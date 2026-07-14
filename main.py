@@ -2,6 +2,8 @@ from fastapi import FastAPI, Request, Form
 from fastapi.responses import PlainTextResponse
 from typing import Optional
 import uvicorn
+from datetime import datetime
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from agents.vision import classify_issue
 from agents.memory import get_asset_history, create_or_update_asset
@@ -11,10 +13,97 @@ from agents.geo_router import get_ward
 from db.connection import get_connection
 
 app = FastAPI()
+scheduler = AsyncIOScheduler()
 
 # Store pending sessions
-# citizen_phone → what we're waiting for
 pending = {}
+
+# ─────────────────────────────────────────
+# SCHEDULER
+# ─────────────────────────────────────────
+
+async def check_escalations():
+    """Runs on schedule — checks all open complaints and escalates if needed"""
+    print("Running escalation check...")
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT id, ticket_id, citizen_phone, ward,
+                   department, escalation_level, filed_at
+            FROM complaints
+            WHERE status = 'filed'
+        """)
+
+        complaints = cur.fetchall()
+        print(f"Open complaints to check: {len(complaints)}")
+
+        for complaint in complaints:
+            comp_id, ticket_id, phone, ward, dept, level, filed_at = complaint
+            days_open = (datetime.now() - filed_at).days
+
+            if days_open >= 7 and level < 2:
+                msg = (
+                    f"⚠️ *SwachhBot Escalation — Level 2*\n\n"
+                    f"Ticket #{ticket_id} unresolved for {days_open} days.\n"
+                    f"Ward: {ward}\n"
+                    f"Department: {dept}\n\n"
+                    f"Escalated to Commissioner level.\n"
+                    f"Action required immediately."
+                )
+                send_whatsapp(phone, msg)
+                cur.execute("""
+                    UPDATE complaints
+                    SET escalation_level = 2
+                    WHERE id = %s
+                """, (comp_id,))
+                print(f"Escalated {ticket_id} to Level 2")
+
+            elif days_open >= 3 and level < 1:
+                msg = (
+                    f"⚠️ *SwachhBot Escalation — Level 1*\n\n"
+                    f"Ticket #{ticket_id} unresolved for {days_open} days.\n"
+                    f"Ward: {ward}\n"
+                    f"Department: {dept}\n\n"
+                    f"Escalated to Ward Councillor.\n"
+                    f"Please action this complaint."
+                )
+                send_whatsapp(phone, msg)
+                cur.execute("""
+                    UPDATE complaints
+                    SET escalation_level = 1
+                    WHERE id = %s
+                """, (comp_id,))
+                print(f"Escalated {ticket_id} to Level 1")
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    except Exception as e:
+        print(f"Escalation check error: {e}")
+
+
+# ─────────────────────────────────────────
+# STARTUP / SHUTDOWN
+# ─────────────────────────────────────────
+
+@app.on_event("startup")
+async def startup_event():
+    # 30 seconds for demo — change to hours=24 for production
+    scheduler.add_job(check_escalations, 'interval', seconds=30)
+    scheduler.start()
+    print("Scheduler started")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    scheduler.shutdown()
+
+
+# ─────────────────────────────────────────
+# WHATSAPP WEBHOOK
+# ─────────────────────────────────────────
 
 @app.post("/webhook/whatsapp")
 async def whatsapp_webhook(
@@ -37,13 +126,10 @@ async def whatsapp_webhook(
     # CASE 1: Citizen sent a photo
     if num_media > 0 and MediaUrl0:
         print("Photo received — running Vision agent")
-
-        # Store photo URL, ask for location
         pending[citizen_phone] = {
             "photo_url": MediaUrl0,
             "waiting_for": "location"
         }
-
         send_whatsapp(citizen_phone,
             "📸 Got your photo! Now please share your location:\n\n"
             "Tap the 📎 attachment icon → Location → "
@@ -112,8 +198,6 @@ async def whatsapp_webhook(
         )
 
         print(f"Complaint filed: {ticket_id}")
-
-        # Clear session
         pending.pop(citizen_phone, None)
         return PlainTextResponse("OK")
 
@@ -137,6 +221,10 @@ async def whatsapp_webhook(
     return PlainTextResponse("OK")
 
 
+# ─────────────────────────────────────────
+# API ENDPOINTS
+# ─────────────────────────────────────────
+
 @app.get("/complaints")
 async def get_complaints():
     """API for React dashboard"""
@@ -147,10 +235,8 @@ async def get_complaints():
             SELECT
                 c.ticket_id, c.issue_type, c.severity,
                 c.ward, c.department, c.status,
-                c.escalation_level, c.filed_at,
-                a.location
+                c.escalation_level, c.filed_at
             FROM complaints c
-            LEFT JOIN assets a ON c.asset_id = a.id
             ORDER BY c.filed_at DESC
             LIMIT 50
         """)
@@ -179,6 +265,7 @@ async def get_complaints():
 async def health():
     return {"status": "SwachhBot is running"}
 
+
 @app.get("/debug")
 async def debug():
     import os
@@ -186,8 +273,55 @@ async def debug():
         "TWILIO_ACCOUNT_SID": os.environ.get("TWILIO_ACCOUNT_SID", "NOT FOUND"),
         "TWILIO_AUTH_TOKEN_LENGTH": len(os.environ.get("TWILIO_AUTH_TOKEN", "")),
         "GROQ_KEY_START": os.environ.get("GROQ_API_KEY", "NOT FOUND")[:10] + "..." if os.environ.get("GROQ_API_KEY") else "NOT FOUND",
-        "ALL_ENV_KEYS": list(os.environ.keys())
     }
+
+
+@app.get("/test/ward")
+async def test_ward():
+    from agents.geo_router import get_ward
+    test_cases = [
+        {"name": "Marathahalli", "lat": 12.975254, "lng": 77.710777},
+        {"name": "Indiranagar", "lat": 12.9784, "lng": 77.6408},
+        {"name": "Koramangala", "lat": 12.9352, "lng": 77.6245},
+        {"name": "Whitefield", "lat": 12.9698, "lng": 77.7499},
+        {"name": "Jayanagar", "lat": 12.9250, "lng": 77.5938},
+    ]
+    results = []
+    for tc in test_cases:
+        ward = get_ward(tc["lat"], tc["lng"])
+        results.append({
+            "location": tc["name"],
+            "ward_detected": ward
+        })
+    return {"ward_routing_test": results}
+
+
+@app.post("/demo/escalate/{ticket_id}")
+async def demo_escalate(ticket_id: str):
+    """Demo endpoint — manually trigger escalation for a ticket"""
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE complaints
+            SET filed_at = NOW() - INTERVAL '4 days'
+            WHERE ticket_id = %s
+            RETURNING ticket_id
+        """, (ticket_id,))
+        result = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+        if result:
+            return {"message": f"Ticket {ticket_id} backdated — escalation fires in next scheduler run (30 sec)"}
+        return {"error": "Ticket not found"}
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ─────────────────────────────────────────
+# MAIN
+# ─────────────────────────────────────────
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
