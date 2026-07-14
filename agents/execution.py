@@ -1,18 +1,27 @@
+import os
 import uuid
-from db.connection import get_connection
 from twilio.rest import Client
-from config import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER
+from db.connection import get_connection
 
-twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+def get_twilio_client():
+    sid = os.environ.get("TWILIO_ACCOUNT_SID")
+    token = os.environ.get("TWILIO_AUTH_TOKEN")
+    print(f"Using SID: {sid}")
+    print(f"Token length: {len(token) if token else 'NONE'}")
+    return Client(sid, token)
 
 def send_whatsapp(to: str, message: str):
     """Send WhatsApp message to citizen"""
     try:
-        twilio_client.messages.create(
-            from_=TWILIO_WHATSAPP_NUMBER,
+        client = get_twilio_client()
+        from_number = os.environ.get("TWILIO_WHATSAPP_NUMBER")
+        print(f"Sending from: {from_number} to: {to}")
+        client.messages.create(
+            from_=from_number,
             to=f'whatsapp:{to}' if not to.startswith('whatsapp:') else to,
             body=message
         )
+        print("WhatsApp sent successfully")
     except Exception as e:
         print(f"WhatsApp send error: {e}")
 
