@@ -1,10 +1,12 @@
 import json
 from shapely.geometry import Point, shape
 
+# Load ward boundaries once at startup
 with open('blr_wards.geojson', 'r') as f:
     WARD_DATA = json.load(f)
 
 def get_ward(lat: float, lng: float) -> str:
+    """Map GPS coordinates to BBMP ward name"""
     try:
         point = Point(lng, lat)
         for feature in WARD_DATA['features']:
