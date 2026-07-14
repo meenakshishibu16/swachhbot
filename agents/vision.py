@@ -3,9 +3,7 @@ import base64
 import json
 import requests
 from groq import Groq
-from config import GROQ_API_KEY, TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN
-
-client = Groq(api_key=GROQ_API_KEY)
+from config import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN
 
 DEPARTMENT_MAP = {
     "garbage": "BBMP Solid Waste Management",
@@ -16,6 +14,7 @@ DEPARTMENT_MAP = {
 }
 
 def download_image_as_base64(media_url: str) -> str:
+    """Download Twilio image and convert to base64"""
     response = requests.get(
         media_url,
         auth=(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
@@ -23,8 +22,11 @@ def download_image_as_base64(media_url: str) -> str:
     return base64.b64encode(response.content).decode('utf-8')
 
 def classify_issue(media_url: str) -> dict:
+    """Vision agent — classify civic issue from photo"""
     try:
+        client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
         image_b64 = download_image_as_base64(media_url)
+
         prompt = """
         You are a civic infrastructure expert for Indian cities.
         Analyze this photo and classify the civic issue.
@@ -36,7 +38,15 @@ def classify_issue(media_url: str) -> dict:
             "confidence": 0.0 to 1.0,
             "description": "one sentence describing what you see"
         }
+        
+        Guidelines:
+        - garbage: overflowing bins, waste on streets, garbage dumps
+        - pothole: road damage, craters, broken road surface
+        - streetlight: broken, missing, or non-functioning street lights
+        - drainage: blocked drains, waterlogging, sewage overflow
+        - other: anything else civic related
         """
+
         response = client.chat.completions.create(
             model='meta-llama/llama-4-scout-17b-16e-instruct',
             messages=[{
@@ -50,16 +60,20 @@ def classify_issue(media_url: str) -> dict:
             }],
             max_tokens=200
         )
+
         result_text = response.choices[0].message.content.strip()
+
         if '```' in result_text:
             result_text = result_text.split('```')[1]
             if result_text.startswith('json'):
                 result_text = result_text[4:]
+
         result = json.loads(result_text)
         result['department'] = DEPARTMENT_MAP.get(
             result['issue_type'], 'BBMP General'
         )
         return result
+
     except Exception as e:
         print(f"Vision agent error: {e}")
         return {
