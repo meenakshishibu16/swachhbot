@@ -179,6 +179,15 @@ async def get_complaints():
 async def health():
     return {"status": "SwachhBot is running"}
 
+@app.get("/debug")
+async def debug():
+    import os
+    return {
+        "TWILIO_ACCOUNT_SID": os.environ.get("TWILIO_ACCOUNT_SID", "NOT FOUND"),
+        "TWILIO_AUTH_TOKEN_LENGTH": len(os.environ.get("TWILIO_AUTH_TOKEN", "")),
+        "GROQ_KEY_START": os.environ.get("GROQ_API_KEY", "NOT FOUND")[:10] + "..." if os.environ.get("GROQ_API_KEY") else "NOT FOUND",
+        "ALL_ENV_KEYS": list(os.environ.keys())
+    }
 
 if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=8000)
