@@ -1,5 +1,6 @@
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import uvicorn
 from datetime import datetime
@@ -15,8 +16,18 @@ from db.connection import get_connection
 app = FastAPI()
 scheduler = AsyncIOScheduler()
 
+# CORS — allows React dashboard to call the API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Store pending sessions
 pending = {}
+
 
 # ─────────────────────────────────────────
 # SCHEDULER
@@ -227,7 +238,7 @@ async def whatsapp_webhook(
 
 @app.get("/complaints")
 async def get_complaints():
-    """API for React dashboard"""
+    """API for React dashboard — includes lat/lng for map pins"""
     try:
         conn = get_connection()
         cur = conn.cursor()
@@ -235,8 +246,11 @@ async def get_complaints():
             SELECT
                 c.ticket_id, c.issue_type, c.severity,
                 c.ward, c.department, c.status,
-                c.escalation_level, c.filed_at
+                c.escalation_level, c.filed_at,
+                ST_Y(a.location::geometry) as lat,
+                ST_X(a.location::geometry) as lng
             FROM complaints c
+            LEFT JOIN assets a ON c.asset_id = a.id
             ORDER BY c.filed_at DESC
             LIMIT 50
         """)
@@ -254,9 +268,43 @@ async def get_complaints():
                 "department": row[4],
                 "status": row[5],
                 "escalation_level": row[6],
-                "filed_at": str(row[7])
+                "filed_at": str(row[7]),
+                "lat": float(row[8]) if row[8] else 12.9716,
+                "lng": float(row[9]) if row[9] else 77.5946
             })
         return complaints
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/resolve/{ticket_id}")
+async def resolve_complaint(ticket_id: str):
+    """Mark complaint as resolved and notify citizen"""
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE complaints
+            SET status = 'resolved', resolved_at = NOW()
+            WHERE ticket_id = %s
+            RETURNING ticket_id, citizen_phone, ward
+        """, (ticket_id,))
+        result = cur.fetchone()
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        if result:
+            ticket, phone, ward = result
+            send_whatsapp(phone,
+                f"✅ *Complaint Resolved*\n\n"
+                f"Ticket #{ticket} has been marked resolved.\n"
+                f"Ward: {ward}\n\n"
+                f"Thank you for helping keep Bengaluru clean! 🙏\n"
+                f"Report any new issues by sending a photo."
+            )
+            return {"message": f"Ticket {ticket_id} resolved"}
+        return {"error": "Ticket not found"}
     except Exception as e:
         return {"error": str(e)}
 
