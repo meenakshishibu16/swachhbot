@@ -19,6 +19,7 @@ const API_URL = 'https://swachhbot-production.up.railway.app'
 const STATUS_COLORS = {
   'filed': '#3B82F6',
   'action_started': '#F59E0B',
+  'action_incomplete': '#EF4444', 
   'pending_citizen': '#8B5CF6',
   'resolved': '#10B981',
   'resolved_certified': '#059669',
@@ -28,6 +29,7 @@ const STATUS_COLORS = {
 const STATUS_LABELS = {
   'filed': 'Filed',
   'action_started': 'In Progress',
+  'action_incomplete': 'Action Incomplete', 
   'pending_citizen': 'Awaiting Citizen',
   'resolved': 'Resolved',
   'resolved_certified': 'Certified ✓',
@@ -85,10 +87,16 @@ export default function App() {
     let filtered = complaints
 
     if (user.role === 'department') {
+      // Department sees only their issue type at level 0
+      // AND their complaints at any level (they do the work)
       filtered = filtered.filter(c => c.issue_type === user.department)
     } else if (user.role === 'councillor') {
-      filtered = filtered.filter(c => c.ward === user.ward && c.escalation_level >= 1)
+      // Councillor sees complaints in their ward at level 1+
+      filtered = filtered.filter(c =>
+        c.ward === user.ward && c.escalation_level >= 1
+      )
     } else if (user.role === 'commissioner') {
+      // Commissioner sees all complaints at level 2+
       filtered = filtered.filter(c => c.escalation_level >= 2)
     }
 

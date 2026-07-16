@@ -3,20 +3,19 @@ from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import uvicorn
-from datetime import datetime
+from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from agents.vision import classify_issue
 from agents.memory import get_asset_history, create_or_update_asset
 from agents.decision import make_decision
-from agents.execution import file_complaint, send_whatsapp
+from agents.execution import file_complaint, send_whatsapp, notify_department
 from agents.geo_router import get_ward
-from db.connection import get_connection
+from db.connection import get_connection, get_contact
 
 app = FastAPI()
 scheduler = AsyncIOScheduler()
 
-# CORS — allows React dashboard to call the API
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -25,8 +24,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Store pending sessions
 pending = {}
+
+
+def twiml_response():
+    return Response(
+        content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+        media_type="application/xml"
+    )
 
 
 # ─────────────────────────────────────────
@@ -60,7 +65,6 @@ async def check_escalations():
             if hours_open < sla_hours:
                 continue
 
-            from datetime import timedelta
             sla_breach_time = filed_at + timedelta(hours=sla_hours)
             if last_escalated_at and last_escalated_at > sla_breach_time:
                 continue
@@ -68,25 +72,26 @@ async def check_escalations():
             new_level = level + 1
             escalate_to = 'Ward Councillor' if new_level == 1 else 'Commissioner'
 
-            # Notify citizen
             send_whatsapp(phone,
                 f"⚠️ *Escalation Notice — Ticket #{ticket_id}*\n\n"
                 f"No action taken after {int(hours_open)} hours.\n"
                 f"Escalated to {escalate_to}.\n\n"
-                f"We'll keep following up until this is resolved. 🙏"
+                f"We'll keep following up until resolved. 🙏"
             )
 
-            # Notify councillor or commissioner
-            from agents.execution import COUNCILLOR_NUMBER, COMMISSIONER_NUMBER
-            official_number = COUNCILLOR_NUMBER if new_level == 1 else COMMISSIONER_NUMBER
-            send_whatsapp(official_number,
-                f"📋 *Escalation Alert — SwachhBot*\n\n"
-                f"Ticket #{ticket_id} has been escalated to you.\n"
-                f"Reason: No action taken by department after {int(hours_open)} hours.\n"
-                f"Ward: {ward}\n"
-                f"Department: {dept}\n\n"
-                f"Please log into the dashboard and take action."
+            official_number = (
+                get_contact('councillor', ward=ward) if new_level == 1
+                else get_contact('commissioner')
             )
+            if official_number:
+                send_whatsapp(official_number,
+                    f"📋 *Escalation Alert — SwachhBot*\n\n"
+                    f"Ticket #{ticket_id} escalated to you.\n"
+                    f"Reason: No action taken after {int(hours_open)} hours.\n"
+                    f"Ward: {ward}\n"
+                    f"Department: {dept}\n\n"
+                    f"Please log into the dashboard and take action."
+                )
 
             cur.execute("""
                 UPDATE complaints
@@ -118,7 +123,6 @@ async def check_escalations():
             if hours_since_action < action_sla:
                 continue
 
-            from datetime import timedelta
             action_breach = action_at + timedelta(hours=action_sla)
             if last_escalated_at and last_escalated_at > action_breach:
                 continue
@@ -126,32 +130,35 @@ async def check_escalations():
             new_level = level + 1
             escalate_to = 'Ward Councillor' if new_level == 1 else 'Commissioner'
 
-            # Notify citizen — different message: action started but incomplete
             send_whatsapp(phone,
                 f"⚠️ *Escalation Notice — Ticket #{ticket_id}*\n\n"
-                f"Action was started by the department {int(hours_since_action)} hours ago "
+                f"Action was started by the department "
+                f"{int(hours_since_action)} hours ago "
                 f"but the issue has not been resolved yet.\n"
                 f"Escalated to {escalate_to} for follow-up.\n\n"
-                f"We'll keep following up until this is resolved. 🙏"
+                f"We'll keep following up until resolved. 🙏"
             )
 
-            # Notify councillor or commissioner — different message
-            from agents.execution import COUNCILLOR_NUMBER, COMMISSIONER_NUMBER
-            official_number = COUNCILLOR_NUMBER if new_level == 1 else COMMISSIONER_NUMBER
-            send_whatsapp(official_number,
-                f"📋 *Escalation Alert — SwachhBot*\n\n"
-                f"Ticket #{ticket_id} has been escalated to you.\n"
-                f"Reason: Action was started by {started_by or dept} "
-                f"{int(hours_since_action)} hours ago but issue remains unresolved.\n"
-                f"Ward: {ward}\n"
-                f"Department: {dept}\n\n"
-                f"Please log into the dashboard and take over."
+            official_number = (
+                get_contact('councillor', ward=ward) if new_level == 1
+                else get_contact('commissioner')
             )
+            if official_number:
+                send_whatsapp(official_number,
+                    f"📋 *Escalation Alert — SwachhBot*\n\n"
+                    f"Ticket #{ticket_id} escalated to you.\n"
+                    f"Reason: Action started by {started_by or dept} "
+                    f"{int(hours_since_action)} hours ago "
+                    f"but issue remains unresolved.\n"
+                    f"Ward: {ward}\n"
+                    f"Department: {dept}\n\n"
+                    f"Please log into the dashboard and take action."
+                )
 
             cur.execute("""
                 UPDATE complaints
                 SET escalation_level = %s,
-                    status = 'filed',
+                    status = 'action_incomplete',
                     action_started_at = NULL,
                     action_started_by = NULL,
                     last_escalated_at = NOW()
@@ -173,7 +180,6 @@ async def check_escalations():
 
 @app.on_event("startup")
 async def startup_event():
-    # 30 seconds for demo — change to hours=24 for production
     scheduler.add_job(check_escalations, 'interval', seconds=30)
     scheduler.start()
     print("Scheduler started")
@@ -205,9 +211,9 @@ async def whatsapp_webhook(
     print(f"\n--- Incoming message from {citizen_phone} ---")
     print(f"Body: {Body}, Media: {num_media}, Lat: {Latitude}, Lng: {Longitude}")
 
-    # CASE 1: Citizen sent a photo
+    # CASE 1: Photo
     if num_media > 0 and MediaUrl0:
-        print("Photo received — running Vision agent")
+        print("Photo received")
         pending[citizen_phone] = {
             "photo_url": MediaUrl0,
             "waiting_for": "location"
@@ -217,36 +223,27 @@ async def whatsapp_webhook(
             "Tap the 📎 attachment icon → Location → "
             "*Send Your Current Location*"
         )
-        return Response(
-            content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
-            media_type="application/xml"
-        )
+        return twiml_response()
 
-    # CASE 2: Citizen sent location
+    # CASE 2: Location
     if Latitude and Longitude:
         lat = float(Latitude)
         lng = float(Longitude)
         print(f"Location received: {lat}, {lng}")
 
         session = pending.get(citizen_phone)
-
         if not session or session.get('waiting_for') != 'location':
             send_whatsapp(citizen_phone,
                 "Please send a photo first, then share your location 📸"
             )
-            return Response(
-                content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
-                media_type="application/xml"
-            )
+            return twiml_response()
 
         photo_url = session['photo_url']
-
         send_whatsapp(citizen_phone,
             "🔍 Analyzing your photo and location...\n"
             "This takes about 10 seconds ⏳"
         )
 
-        # Run the 4 agents
         print("Running Vision agent...")
         vision = classify_issue(photo_url)
         print(f"Vision result: {vision}")
@@ -276,23 +273,15 @@ async def whatsapp_webhook(
         )
 
         ticket_id = file_complaint(
-            citizen_phone,
-            asset_id,
-            photo_url,
-            vision,
-            memory,
-            decision,
-            ward
+            citizen_phone, asset_id, photo_url,
+            vision, memory, decision, ward
         )
 
         print(f"Complaint filed: {ticket_id}")
         pending.pop(citizen_phone, None)
-        return Response(
-            content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
-            media_type="application/xml"
-        )
+        return twiml_response()
 
-    # CASE 3: Citizen confirming resolution (replies 1 or 2)
+    # CASE 3: Citizen confirms resolution (1 or 2)
     if body in ['1', '2']:
         try:
             conn = get_connection()
@@ -335,6 +324,7 @@ async def whatsapp_webhook(
                             citizen_confirmed = FALSE,
                             reactivated_count = reactivated_count + 1,
                             action_started_at = NULL,
+                            action_started_by = NULL,
                             filed_at = NOW(),
                             escalation_level = escalation_level + 1
                         WHERE ticket_id = %s
@@ -349,15 +339,12 @@ async def whatsapp_webhook(
                 conn2.commit()
                 cur2.close()
                 conn2.close()
-                return Response(
-                    content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
-                    media_type="application/xml"
-                )
+                return twiml_response()
 
         except Exception as e:
             print(f"Citizen confirm error: {e}")
 
-    # CASE 4: Welcome message
+    # CASE 4: Welcome
     if body in ['hi', 'hello', 'hey', 'start']:
         send_whatsapp(citizen_phone,
             "👋 Welcome to *SwachhBot*!\n\n"
@@ -368,19 +355,13 @@ async def whatsapp_webhook(
             "I'll handle everything else — filing, follow-up, "
             "and escalation until it's resolved. 🏙️"
         )
-        return Response(
-            content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
-            media_type="application/xml"
-        )
+        return twiml_response()
 
     # Default
     send_whatsapp(citizen_phone,
         "Please send a 📸 *photo* of the civic issue to get started."
     )
-    return Response(
-        content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
-        media_type="application/xml"
-    )
+    return twiml_response()
 
 
 # ─────────────────────────────────────────
@@ -417,28 +398,28 @@ async def get_complaints():
         complaints = []
         for row in rows:
             complaints.append({
-            "ticket_id": row[0],
-            "issue_type": row[1],
-            "severity": row[2],
-            "ward": row[3],
-            "department": row[4],
-            "status": row[5],
-            "escalation_level": row[6],
-            "filed_at": str(row[7]),
-            "action_started_at": str(row[8]) if row[8] else None,
-            "action_started_by": row[9],
-            "resolved_note": row[10],
-            "resolved_by": row[11],
-            "resolved_photo_url": row[12],
-            "reactivated_count": row[13] or 0,
-            "photo_url": row[14],
-            "decision_recommendation": row[15],
-            "failure_probability": row[16],
-            "decision_action": row[17],
-            "decision_reasoning": row[18],
-            "lat": float(row[19]) if row[19] else 12.9716,
-            "lng": float(row[20]) if row[20] else 77.5946
-        })
+                "ticket_id": row[0],
+                "issue_type": row[1],
+                "severity": row[2],
+                "ward": row[3],
+                "department": row[4],
+                "status": row[5],
+                "escalation_level": row[6],
+                "filed_at": str(row[7]),
+                "action_started_at": str(row[8]) if row[8] else None,
+                "action_started_by": row[9],
+                "resolved_note": row[10],
+                "resolved_by": row[11],
+                "resolved_photo_url": row[12],
+                "reactivated_count": row[13] or 0,
+                "photo_url": row[14],
+                "decision_recommendation": row[15],
+                "failure_probability": row[16],
+                "decision_action": row[17],
+                "decision_reasoning": row[18],
+                "lat": float(row[19]) if row[19] else 12.9716,
+                "lng": float(row[20]) if row[20] else 77.5946
+            })
         return complaints
     except Exception as e:
         return {"error": str(e)}
@@ -450,12 +431,10 @@ async def start_action(ticket_id: str, data: dict):
         conn = get_connection()
         cur = conn.cursor()
 
-        # Check if action already started by someone else
         cur.execute("""
             SELECT action_started_by, action_started_at, status,
                    issue_type, severity, escalation_level
-            FROM complaints
-            WHERE ticket_id = %s
+            FROM complaints WHERE ticket_id = %s
         """, (ticket_id,))
         row = cur.fetchone()
 
@@ -464,19 +443,15 @@ async def start_action(ticket_id: str, data: dict):
 
         started_by, started_at, status, issue_type, severity, level = row
 
-        # Check if already locked by someone
         if started_by and status == 'action_started':
-            # Allow override by councillor or commissioner
             if not data.get('override'):
                 return {
                     "error": f"Action already started by {started_by}",
                     "locked": True,
                     "started_by": started_by
                 }
-            # Override — release previous lock and take ownership
-            print(f"Override by {data.get('started_by')} — releasing lock from {started_by}")
+            print(f"Override by {data.get('started_by')}")
 
-        # Get SLA config
         cur.execute("""
             SELECT action_started_hours FROM sla_config
             WHERE issue_type = %s AND severity = %s
@@ -484,7 +459,6 @@ async def start_action(ticket_id: str, data: dict):
         sla_row = cur.fetchone()
         action_sla_hours = sla_row[0] if sla_row else 24
 
-        # Lock complaint to this user
         cur.execute("""
             UPDATE complaints
             SET status = 'action_started',
@@ -510,8 +484,7 @@ async def start_action(ticket_id: str, data: dict):
             )
             return {
                 "message": "Action started",
-                "action_sla_hours": action_sla_hours,
-                "locked_to": data.get('started_by')
+                "action_sla_hours": action_sla_hours
             }
         return {"error": "Ticket not found"}
 
@@ -520,7 +493,7 @@ async def start_action(ticket_id: str, data: dict):
 
 
 @app.post("/complaint/{ticket_id}/resolve")
-async def resolve_complaint_v2(ticket_id: str, data: dict):
+async def resolve_complaint(ticket_id: str, data: dict):
     try:
         conn = get_connection()
         cur = conn.cursor()
@@ -567,6 +540,102 @@ async def resolve_complaint_v2(ticket_id: str, data: dict):
             send_whatsapp(phone, msg)
             return {"message": "Pending citizen confirmation"}
         return {"error": "Ticket not found"}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/complaint/{ticket_id}/direct-department")
+async def direct_department(ticket_id: str, data: dict):
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT citizen_phone, ward, department, issue_type
+            FROM complaints WHERE ticket_id = %s
+        """, (ticket_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if not row:
+            return {"error": "Ticket not found"}
+
+        phone, ward, dept, issue_type = row
+        directed_by = data.get('directed_by')
+
+        dept_number = get_contact('department', department=issue_type)
+        if dept_number:
+            send_whatsapp(dept_number,
+                f"📢 *Direction from Ward Councillor*\n\n"
+                f"Ticket #{ticket_id} requires immediate attention.\n"
+                f"Councillor {directed_by} has directed you to act now.\n"
+                f"Ward: {ward}\n\n"
+                f"Please log into the dashboard immediately."
+            )
+
+        send_whatsapp(phone,
+            f"📢 *Update — Ticket #{ticket_id}*\n\n"
+            f"Ward Councillor {directed_by} has directed the "
+            f"{dept} department to act on your complaint.\n"
+            f"Action expected soon. 🙏"
+        )
+
+        return {"message": "Department directed successfully"}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.post("/complaint/{ticket_id}/issue-directive")
+async def issue_directive(ticket_id: str, data: dict):
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT citizen_phone, ward, department, issue_type
+            FROM complaints WHERE ticket_id = %s
+        """, (ticket_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if not row:
+            return {"error": "Ticket not found"}
+
+        phone, ward, dept, issue_type = row
+        directed_by = data.get('directed_by')
+
+        dept_number = get_contact('department', department=issue_type)
+        councillor_number = get_contact('councillor', ward=ward)
+
+        if dept_number:
+            send_whatsapp(dept_number,
+                f"📋 *Formal Directive — BBMP Commissioner*\n\n"
+                f"Ticket #{ticket_id} — IMMEDIATE ACTION REQUIRED.\n"
+                f"Commissioner {directed_by} has issued a formal directive.\n"
+                f"Ward: {ward}\n\n"
+                f"Must be resolved within 24 hours.\n"
+                f"Log into the dashboard immediately."
+            )
+
+        if councillor_number:
+            send_whatsapp(councillor_number,
+                f"📋 *Commissioner Directive Issued*\n\n"
+                f"Commissioner {directed_by} has issued a formal directive "
+                f"for Ticket #{ticket_id} in your ward.\n"
+                f"Ward: {ward}\n"
+                f"Please ensure the department acts immediately."
+            )
+
+        send_whatsapp(phone,
+            f"📋 *Update — Ticket #{ticket_id}*\n\n"
+            f"BBMP Commissioner has issued a formal directive.\n"
+            f"Resolution expected within 24 hours. 🙏"
+        )
+
+        return {"message": "Directive issued successfully"}
+
     except Exception as e:
         return {"error": str(e)}
 
@@ -586,13 +655,13 @@ async def debug():
     return {
         "TWILIO_ACCOUNT_SID": os.environ.get("TWILIO_ACCOUNT_SID", "NOT FOUND"),
         "TWILIO_AUTH_TOKEN_LENGTH": len(os.environ.get("TWILIO_AUTH_TOKEN", "")),
-        "GROQ_KEY_START": os.environ.get("GROQ_API_KEY", "NOT FOUND")[:10] + "..." if os.environ.get("GROQ_API_KEY") else "NOT FOUND",
+        "GROQ_KEY_START": os.environ.get("GROQ_API_KEY", "NOT FOUND")[:10] + "..."
+        if os.environ.get("GROQ_API_KEY") else "NOT FOUND",
     }
 
 
 @app.get("/test/ward")
 async def test_ward():
-    from agents.geo_router import get_ward
     test_cases = [
         {"name": "Marathahalli", "lat": 12.975254, "lng": 77.710777},
         {"name": "Indiranagar", "lat": 12.9784, "lng": 77.6408},
@@ -642,19 +711,25 @@ async def seed_demo_data():
         assets = cur.fetchall()
 
         if not assets:
-            return {"error": "No assets found — run Supabase seed SQL first"}
+            return {"error": "No assets found"}
+
+        statuses = ['filed', 'action_started', 'action_incomplete', 'resolved', 'filed']
+        escalations = [0, 0, 1, 0, 2]
+        intervals = ['1 day', '2 days', '4 days', '2 days', '8 days']
+        ticket_ids = ['BBMP-A1B2C3', 'BBMP-D4E5F6', 'BBMP-G7H8I9', 'BBMP-J1K2L3', 'BBMP-M4N5O6']
 
         for i, asset in enumerate(assets):
-            statuses = ['filed', 'action_started', 'filed', 'resolved', 'filed']
-            escalations = [0, 0, 1, 0, 2]
-            intervals = ['1 day', '2 days', '4 days', '2 days', '8 days']
-            ticket_ids = ['BBMP-A1B2C3', 'BBMP-D4E5F6', 'BBMP-G7H8I9', 'BBMP-J1K2L3', 'BBMP-M4N5O6']
-
             cur.execute(f"""
                 INSERT INTO complaints
                 (asset_id, citizen_phone, ticket_id, issue_type, severity,
-                 ward, department, status, escalation_level, filed_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW() - INTERVAL '{intervals[i]}')
+                 ward, department, status, escalation_level, filed_at,
+                 decision_recommendation, failure_probability,
+                 decision_action, decision_reasoning)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s,
+                        NOW() - INTERVAL '{intervals[i]}',
+                        'patch', 30,
+                        'Standard repair recommended',
+                        'First time reported. Standard response recommended.')
                 ON CONFLICT (ticket_id) DO NOTHING
             """, (
                 asset[0], 'whatsapp:+917736161679',
@@ -666,37 +741,8 @@ async def seed_demo_data():
         conn.commit()
         cur.close()
         conn.close()
-        return {"message": "Demo data seeded — refresh dashboard"}
+        return {"message": "Demo data seeded"}
 
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@app.get("/resolve/{ticket_id}")
-async def resolve_complaint_simple(ticket_id: str):
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("""
-            UPDATE complaints
-            SET status = 'resolved', resolved_at = NOW()
-            WHERE ticket_id = %s
-            RETURNING ticket_id, citizen_phone, ward
-        """, (ticket_id,))
-        result = cur.fetchone()
-        conn.commit()
-        cur.close()
-        conn.close()
-        if result:
-            ticket, phone, ward = result
-            send_whatsapp(phone,
-                f"✅ *Complaint Resolved*\n\n"
-                f"Ticket #{ticket} has been resolved.\n"
-                f"Ward: {ward}\n\n"
-                f"Thank you for helping keep Bengaluru clean! 🙏"
-            )
-            return {"message": f"Ticket {ticket_id} resolved"}
-        return {"error": "Ticket not found"}
     except Exception as e:
         return {"error": str(e)}
 

@@ -4,17 +4,6 @@ import requests
 from twilio.rest import Client
 from db.connection import get_connection
 
-# Department WhatsApp numbers (dummy for prototype)
-DEPARTMENT_CONTACTS = {
-    "garbage":     "+917736161679",  # mock — BBMP Solid Waste
-    "pothole":     "+917736161679",  # mock — BBMP Roads
-    "streetlight": "+917736161679",  # mock — BBMP Electrical
-    "drainage":    "+917736161679",  # mock — BBMP Stormwater
-}
-
-COUNCILLOR_NUMBER = "+917736161679"   # mock — Ward Councillor
-COMMISSIONER_NUMBER = "+917736161679" # mock — Commissioner
-
 
 def get_twilio_client():
     sid = os.environ.get("TWILIO_ACCOUNT_SID")
@@ -84,8 +73,10 @@ def notify_department(issue_type: str, ticket_id: str, ward: str,
                       severity: str, photo_url: str,
                       decision: dict, memory: dict):
     """Notify department when new complaint is filed"""
-    dept_number = DEPARTMENT_CONTACTS.get(issue_type)
+    from db.connection import get_contact
+    dept_number = get_contact('department', department=issue_type)
     if not dept_number:
+        print(f"No contact found for department: {issue_type}")
         return
 
     history_line = ""

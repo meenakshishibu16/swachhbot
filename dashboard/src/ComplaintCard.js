@@ -9,29 +9,53 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, statusColo
   const [loading, setLoading] = useState(false)
   const [showResolveForm, setShowResolveForm] = useState(false)
   const [showPhoto, setShowPhoto] = useState(false)
-  const [lockError, setLockError] = useState('')
+  const [actionMessage, setActionMessage] = useState('')
 
-  const handleStartAction = async (override = false) => {
+  // Department — starts action and owns the lock
+  const handleStartAction = async () => {
     setLoading(true)
-    setLockError('')
     const res = await fetch(`${API_URL}/complaint/${c.ticket_id}/start-action`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        started_by: user.name,
-        role: user.role,
-        override: override
-      })
+      body: JSON.stringify({ started_by: user.name, role: user.role })
     })
     const data = await res.json()
-    if (data.locked && !override) {
-      setLockError(`Currently being actioned by ${data.started_by}`)
-    } else {
+    if (data.error) setActionMessage(data.error)
+    else onUpdate()
+    setLoading(false)
+  }
+
+  // Councillor — directs department
+  const handleDirectDepartment = async () => {
+    setLoading(true)
+    const res = await fetch(`${API_URL}/complaint/${c.ticket_id}/direct-department`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directed_by: user.name })
+    })
+    if (res.ok) {
+      setActionMessage('Department has been directed to act immediately.')
       onUpdate()
     }
     setLoading(false)
   }
 
+  // Commissioner — issues directive
+  const handleIssueDirective = async () => {
+    setLoading(true)
+    const res = await fetch(`${API_URL}/complaint/${c.ticket_id}/issue-directive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ directed_by: user.name })
+    })
+    if (res.ok) {
+      setActionMessage('Formal directive issued to department and councillor.')
+      onUpdate()
+    }
+    setLoading(false)
+  }
+
+  // Resolve — all roles but different labels
   const handleResolve = async () => {
     setLoading(true)
     let photoUrl = null
@@ -41,7 +65,6 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, statusColo
       const { data } = await supabase.storage
         .from('resolved-photos')
         .upload(fileName, photoFile, { upsert: true })
-
       if (data) {
         const { data: urlData } = supabase.storage
           .from('resolved-photos')
@@ -68,40 +91,40 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, statusColo
 
   const color = statusColors[c.status] || '#3B82F6'
 
-  // Lock logic
-  const isLockedByOther = c.action_started_by &&
-    c.action_started_by !== user.name &&
-    c.status === 'action_started'
+  // Department owns the lock always
+  const deptIsActioning = c.action_started_at && c.status === 'action_started'
 
-  // Who can Start Action based on escalation level
-  const canStartAction = (
-    (c.status === 'filed' || c.status === 'reactivated') &&
-    !c.action_started_at
-  ) && (
-    (user.role === 'department' && c.escalation_level === 0) ||
-    (user.role === 'councillor' && c.escalation_level >= 1) ||
-    (user.role === 'commissioner')
-  )
+  // Button visibility per role
+  const showStartAction = user.role === 'department' &&
+    (c.status === 'filed' || c.status === 'reactivated' || c.status === 'action_incomplete') &&
+    !deptIsActioning
 
-  // Who can Override a locked complaint
-  const canOverride = isLockedByOther && (
-    user.role === 'councillor' ||
-    user.role === 'commissioner'
-  )
+  const showDirectDept = user.role === 'councillor' &&
+    c.escalation_level >= 1 &&
+    c.status !== 'resolved' &&
+    c.status !== 'resolved_certified' &&
+    c.status !== 'pending_citizen'
 
-  // Who can Resolve
-  const canResolve = (
+  const showIssueDirective = user.role === 'commissioner' &&
+    c.status !== 'resolved' &&
+    c.status !== 'resolved_certified' &&
+    c.status !== 'pending_citizen'
+
+  const showResolveButton = (
     c.status !== 'resolved' &&
     c.status !== 'resolved_certified' &&
     c.status !== 'pending_citizen'
   ) && (
-    // Dept can resolve if they own it (level 0)
-    (user.role === 'department' && c.action_started_at) ||
-    // Councillor can resolve at level 1+
-    (user.role === 'councillor' && c.escalation_level >= 1) ||
-    // Commissioner can always resolve
-    (user.role === 'commissioner')
+    (user.role === 'department' && deptIsActioning) ||
+    user.role === 'councillor' ||
+    user.role === 'commissioner'
   )
+
+  const resolveLabel = {
+    department: '✅ Mark Resolved',
+    councillor: '✅ Confirm Resolution',
+    commissioner: '✅ Close Complaint'
+  }
 
   const severityColor = {
     high: { bg: '#FEF2F2', text: '#DC2626' },
@@ -176,10 +199,8 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, statusColo
               src={c.photo_url}
               alt="Citizen complaint"
               style={{
-                width: '100%',
-                maxHeight: '200px',
-                objectFit: 'cover',
-                borderRadius: '8px',
+                width: '100%', maxHeight: '200px',
+                objectFit: 'cover', borderRadius: '8px',
                 border: '1px solid #E2E8F0'
               }}
               onError={e => { e.target.style.display = 'none' }}
@@ -191,31 +212,24 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, statusColo
       {/* Decision Agent output */}
       {c.decision_recommendation && (
         <div style={{
-          background: '#EFF6FF',
-          border: '1px solid #BFDBFE',
-          borderRadius: '8px',
-          padding: '10px 12px',
-          marginBottom: '12px'
+          background: '#EFF6FF', border: '1px solid #BFDBFE',
+          borderRadius: '8px', padding: '10px 12px', marginBottom: '12px'
         }}>
           <div style={{ fontSize: '11px', fontWeight: '600', color: '#1E40AF', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
             🧠 AI Decision
           </div>
           <div style={{ fontSize: '12px', color: '#1E3A8A', marginBottom: '4px' }}>
             <strong>Recommendation:</strong>{' '}
-            {c.decision_recommendation === 'permanent_fix'
-              ? '🔧 Permanent Fix'
-              : '🩹 Patch Repair'}
+            {c.decision_recommendation === 'permanent_fix' ? '🔧 Permanent Fix' : '🩹 Patch Repair'}
           </div>
           {c.failure_probability !== null && c.failure_probability !== undefined && (
             <div style={{ fontSize: '12px', color: '#1E3A8A', marginBottom: '4px' }}>
               <strong>Failure probability:</strong>
               <span style={{
-                marginLeft: '6px',
-                padding: '1px 6px',
+                marginLeft: '6px', padding: '1px 6px',
                 background: c.failure_probability > 70 ? '#FEF2F2' : '#FFFBEB',
                 color: c.failure_probability > 70 ? '#DC2626' : '#B45309',
-                borderRadius: '4px',
-                fontWeight: '600'
+                borderRadius: '4px', fontWeight: '600'
               }}>
                 {c.failure_probability}%
               </span>
@@ -236,17 +250,12 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, statusColo
 
       {/* Complaint details */}
       <div style={{
-        background: '#F8FAFC',
-        borderRadius: '6px',
-        padding: '10px 12px',
-        marginBottom: '12px',
-        fontSize: '12px',
-        color: '#374151'
+        background: '#F8FAFC', borderRadius: '6px',
+        padding: '10px 12px', marginBottom: '12px',
+        fontSize: '12px', color: '#374151'
       }}>
         <div style={{ marginBottom: '4px' }}>📍 {c.ward}</div>
-        <div style={{ marginBottom: '4px' }}>
-          🕐 Filed: {new Date(c.filed_at).toLocaleString('en-IN')}
-        </div>
+        <div style={{ marginBottom: '4px' }}>🕐 Filed: {new Date(c.filed_at).toLocaleString('en-IN')}</div>
         {c.action_started_at && (
           <div style={{ marginBottom: '4px', color: '#B45309' }}>
             ⚡ Action started: {new Date(c.action_started_at).toLocaleString('en-IN')}
@@ -257,6 +266,11 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, statusColo
             👤 Actioned by: <strong>{c.action_started_by}</strong>
           </div>
         )}
+        {c.status === 'action_incomplete' && (
+          <div style={{ color: '#DC2626', fontWeight: '500' }}>
+            ⏱️ Action started but not resolved within SLA
+          </div>
+        )}
         {c.reactivated_count > 0 && (
           <div style={{ color: '#DC2626' }}>
             🔄 Reactivated {c.reactivated_count} times
@@ -264,47 +278,33 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, statusColo
         )}
       </div>
 
-      {/* Lock warning */}
-      {isLockedByOther && (
+      {/* Dept actioning indicator for councillor/commissioner */}
+      {deptIsActioning && user.role !== 'department' && (
         <div style={{
-          background: '#FFFBEB',
-          border: '1px solid #FCD34D',
-          borderRadius: '6px',
-          padding: '8px 12px',
-          marginBottom: '12px',
-          fontSize: '12px',
-          color: '#92400E'
+          background: '#FFFBEB', border: '1px solid #FCD34D',
+          borderRadius: '6px', padding: '8px 12px', marginBottom: '12px',
+          fontSize: '12px', color: '#92400E'
         }}>
-          ⚡ Currently being actioned by <strong>{c.action_started_by}</strong>
-          {(user.role === 'councillor' || user.role === 'commissioner') && (
-            <span style={{ color: '#64748B' }}> — you can override below</span>
-          )}
+          ⚡ Department is currently working on this
         </div>
       )}
 
-      {/* Lock error */}
-      {lockError && (
+      {/* Action message feedback */}
+      {actionMessage && (
         <div style={{
-          background: '#FEF2F2',
-          border: '1px solid #FECACA',
-          borderRadius: '6px',
-          padding: '8px 12px',
-          marginBottom: '12px',
-          fontSize: '12px',
-          color: '#DC2626'
+          background: '#F0FDF4', border: '1px solid #BBF7D0',
+          borderRadius: '6px', padding: '8px 12px', marginBottom: '12px',
+          fontSize: '12px', color: '#15803D'
         }}>
-          ⚠️ {lockError}
+          ✅ {actionMessage}
         </div>
       )}
 
       {/* Resolved info */}
       {c.resolved_note && (
         <div style={{
-          background: '#F0FDF4',
-          border: '1px solid #BBF7D0',
-          borderRadius: '6px',
-          padding: '10px 12px',
-          marginBottom: '12px',
+          background: '#F0FDF4', border: '1px solid #BBF7D0',
+          borderRadius: '6px', padding: '10px 12px', marginBottom: '12px',
           fontSize: '12px'
         }}>
           <div style={{ fontWeight: '500', color: '#15803D', marginBottom: '4px' }}>
@@ -323,10 +323,8 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, statusColo
                 src={c.resolved_photo_url}
                 alt="Resolved"
                 style={{
-                  width: '100%',
-                  maxHeight: '150px',
-                  objectFit: 'cover',
-                  borderRadius: '6px',
+                  width: '100%', maxHeight: '150px',
+                  objectFit: 'cover', borderRadius: '6px',
                   border: '1px solid #BBF7D0'
                 }}
               />
@@ -338,62 +336,47 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, statusColo
       {/* Action buttons */}
       <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
 
-        {/* Start Action */}
-        {canStartAction && (
-          <button
-            onClick={() => handleStartAction(false)}
-            disabled={loading}
-            style={{
-              padding: '8px 16px',
-              background: '#F59E0B',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: '500'
-            }}
-          >
+        {/* Department — Start Action */}
+        {showStartAction && (
+          <button onClick={handleStartAction} disabled={loading} style={{
+            padding: '8px 16px', background: '#F59E0B',
+            color: '#fff', border: 'none', borderRadius: '6px',
+            cursor: 'pointer', fontSize: '13px', fontWeight: '500'
+          }}>
             ⚡ Start Action
           </button>
         )}
 
-        {/* Override button — only for councillor/commissioner */}
-        {canOverride && (
-          <button
-            onClick={() => handleStartAction(true)}
-            disabled={loading}
-            style={{
-              padding: '8px 16px',
-              background: '#EF4444',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: '500'
-            }}
-          >
-            ⚠️ Override & Take Action
+        {/* Councillor — Direct Department */}
+        {showDirectDept && (
+          <button onClick={handleDirectDepartment} disabled={loading} style={{
+            padding: '8px 16px', background: '#7C3AED',
+            color: '#fff', border: 'none', borderRadius: '6px',
+            cursor: 'pointer', fontSize: '13px', fontWeight: '500'
+          }}>
+            📢 Direct Department
           </button>
         )}
 
-        {/* Mark Resolved */}
-        {canResolve && !showResolveForm && (
-          <button
-            onClick={() => setShowResolveForm(true)}
-            style={{
-              padding: '8px 16px',
-              background: '#10B981',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: '500'
-            }}
-          >
-            ✅ Mark Resolved
+        {/* Commissioner — Issue Directive */}
+        {showIssueDirective && (
+          <button onClick={handleIssueDirective} disabled={loading} style={{
+            padding: '8px 16px', background: '#DC2626',
+            color: '#fff', border: 'none', borderRadius: '6px',
+            cursor: 'pointer', fontSize: '13px', fontWeight: '500'
+          }}>
+            📋 Issue Directive
+          </button>
+        )}
+
+        {/* Resolve button — all roles */}
+        {showResolveButton && !showResolveForm && (
+          <button onClick={() => setShowResolveForm(true)} style={{
+            padding: '8px 16px', background: '#10B981',
+            color: '#fff', border: 'none', borderRadius: '6px',
+            cursor: 'pointer', fontSize: '13px', fontWeight: '500'
+          }}>
+            {resolveLabel[user.role] || '✅ Mark Resolved'}
           </button>
         )}
       </div>
@@ -401,10 +384,8 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, statusColo
       {/* Resolve form */}
       {showResolveForm && (
         <div style={{
-          marginTop: '12px',
-          padding: '14px',
-          background: '#F8FAFC',
-          border: '1px solid #E2E8F0',
+          marginTop: '12px', padding: '14px',
+          background: '#F8FAFC', border: '1px solid #E2E8F0',
           borderRadius: '8px'
         }}>
           <div style={{ fontSize: '13px', fontWeight: '500', color: '#0F172A', marginBottom: '12px' }}>
@@ -412,76 +393,53 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, statusColo
           </div>
 
           <div style={{ marginBottom: '12px' }}>
-            <label style={{
-              fontSize: '12px', fontWeight: '500',
-              color: '#374151', display: 'block', marginBottom: '6px'
-            }}>
+            <label style={{ fontSize: '12px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '6px' }}>
               Upload resolved photo
             </label>
             <input
-              type="file"
-              accept="image/*"
+              type="file" accept="image/*"
               onChange={e => setPhotoFile(e.target.files[0])}
               style={{ fontSize: '12px', color: '#374151' }}
             />
           </div>
 
           <div style={{ marginBottom: '12px' }}>
-            <label style={{
-              fontSize: '12px', fontWeight: '500',
-              color: '#374151', display: 'block', marginBottom: '6px'
-            }}>
-              Resolution note
+            <label style={{ fontSize: '12px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '6px' }}>
+              {user.role === 'department' ? 'What was done' : user.role === 'councillor' ? 'Verification note' : 'Directive note'}
             </label>
             <textarea
               value={note}
               onChange={e => setNote(e.target.value)}
-              placeholder="Describe what was done to resolve the issue..."
+              placeholder={
+                user.role === 'department'
+                  ? 'Describe what was done to fix the issue...'
+                  : user.role === 'councillor'
+                  ? 'Confirm the issue has been resolved...'
+                  : 'Issue formal closure directive...'
+              }
               rows={3}
               style={{
-                width: '100%',
-                padding: '8px 10px',
-                border: '1px solid #E2E8F0',
-                borderRadius: '6px',
-                fontSize: '13px',
-                color: '#0F172A',
-                background: '#fff',
-                boxSizing: 'border-box',
-                resize: 'vertical',
-                outline: 'none'
+                width: '100%', padding: '8px 10px',
+                border: '1px solid #E2E8F0', borderRadius: '6px',
+                fontSize: '13px', color: '#0F172A', background: '#fff',
+                boxSizing: 'border-box', resize: 'vertical', outline: 'none'
               }}
             />
           </div>
 
           <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              onClick={handleResolve}
-              disabled={loading}
-              style={{
-                padding: '8px 18px',
-                background: '#10B981',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '13px',
-                fontWeight: '500'
-              }}
-            >
-              {loading ? 'Submitting...' : 'Submit Resolution'}
+            <button onClick={handleResolve} disabled={loading} style={{
+              padding: '8px 18px', background: '#10B981',
+              color: '#fff', border: 'none', borderRadius: '6px',
+              cursor: 'pointer', fontSize: '13px', fontWeight: '500'
+            }}>
+              {loading ? 'Submitting...' : resolveLabel[user.role] || '✅ Submit'}
             </button>
-            <button
-              onClick={() => setShowResolveForm(false)}
-              style={{
-                padding: '8px 14px',
-                background: '#fff',
-                color: '#64748B',
-                border: '1px solid #E2E8F0',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '13px'
-              }}
-            >
+            <button onClick={() => setShowResolveForm(false)} style={{
+              padding: '8px 14px', background: '#fff',
+              color: '#64748B', border: '1px solid #E2E8F0',
+              borderRadius: '6px', cursor: 'pointer', fontSize: '13px'
+            }}>
               Cancel
             </button>
           </div>
