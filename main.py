@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request, Form
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional
 import uvicorn
@@ -217,7 +217,10 @@ async def whatsapp_webhook(
             "Tap the 📎 attachment icon → Location → "
             "*Send Your Current Location*"
         )
-        return PlainTextResponse("OK")
+        return Response(
+            content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+            media_type="application/xml"
+        )
 
     # CASE 2: Citizen sent location
     if Latitude and Longitude:
@@ -231,7 +234,10 @@ async def whatsapp_webhook(
             send_whatsapp(citizen_phone,
                 "Please send a photo first, then share your location 📸"
             )
-            return PlainTextResponse("OK")
+            return Response(
+                content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+                media_type="application/xml"
+            )
 
         photo_url = session['photo_url']
 
@@ -281,7 +287,10 @@ async def whatsapp_webhook(
 
         print(f"Complaint filed: {ticket_id}")
         pending.pop(citizen_phone, None)
-        return PlainTextResponse("OK")
+        return Response(
+            content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+            media_type="application/xml"
+        )
 
     # CASE 3: Citizen confirming resolution (replies 1 or 2)
     if body in ['1', '2']:
@@ -340,7 +349,10 @@ async def whatsapp_webhook(
                 conn2.commit()
                 cur2.close()
                 conn2.close()
-                return PlainTextResponse("OK")
+                return Response(
+                    content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+                    media_type="application/xml"
+                )
 
         except Exception as e:
             print(f"Citizen confirm error: {e}")
@@ -356,13 +368,19 @@ async def whatsapp_webhook(
             "I'll handle everything else — filing, follow-up, "
             "and escalation until it's resolved. 🏙️"
         )
-        return PlainTextResponse("OK")
+        return Response(
+            content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+            media_type="application/xml"
+        )
 
     # Default
     send_whatsapp(citizen_phone,
         "Please send a 📸 *photo* of the civic issue to get started."
     )
-    return PlainTextResponse("OK")
+    return Response(
+        content='<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
+        media_type="application/xml"
+    )
 
 
 # ─────────────────────────────────────────
@@ -448,11 +466,15 @@ async def start_action(ticket_id: str, data: dict):
 
         # Check if already locked by someone
         if started_by and status == 'action_started':
-            return {
-                "error": f"Action already started by {started_by}",
-                "locked": True,
-                "started_by": started_by
-            }
+            # Allow override by councillor or commissioner
+            if not data.get('override'):
+                return {
+                    "error": f"Action already started by {started_by}",
+                    "locked": True,
+                    "started_by": started_by
+                }
+            # Override — release previous lock and take ownership
+            print(f"Override by {data.get('started_by')} — releasing lock from {started_by}")
 
         # Get SLA config
         cur.execute("""
