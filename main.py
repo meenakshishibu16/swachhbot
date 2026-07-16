@@ -165,6 +165,68 @@ async def check_escalations():
                 WHERE id = %s
             """, (new_level, comp_id))
             print(f"Action-incomplete escalation: {ticket_id} → Level {new_level}")
+        
+        # Case 3: Commissioner hasn't acted — daily reminder
+        cur.execute("""
+            SELECT c.id, c.ticket_id, c.citizen_phone, c.ward,
+                   c.department, c.filed_at, c.last_escalated_at
+            FROM complaints c
+            WHERE c.escalation_level = 2
+            AND c.status NOT IN (
+                'resolved', 'resolved_certified', 
+                'pending_citizen'
+            )
+            AND c.last_escalated_at IS NOT NULL
+        """)
+        commissioner_level = cur.fetchall()
+
+        for row in commissioner_level:
+            (comp_id, ticket_id, phone, ward,
+             dept, filed_at, last_escalated_at) = row
+
+            # Only remind every 24 hours
+            hours_since_last = (
+                datetime.now() - last_escalated_at
+            ).total_seconds() / 3600
+
+            if hours_since_last < 24:
+                continue
+
+            total_hours = (
+                datetime.now() - filed_at
+            ).total_seconds() / 3600
+            days_total = int(total_hours / 24)
+
+            commissioner_number = get_contact('commissioner')
+            if commissioner_number:
+                send_whatsapp(commissioner_number,
+                    f"🔴 *Unresolved Complaint — Day {days_total}*\n\n"
+                    f"Ticket #{ticket_id} remains unresolved "
+                    f"at Commissioner level.\n"
+                    f"Ward: {ward}\n"
+                    f"Department: {dept}\n\n"
+                    f"This complaint has been pending for "
+                    f"{days_total} days total.\n"
+                    f"Immediate action required."
+                )
+
+            # Also remind citizen it's still being tracked
+            send_whatsapp(phone,
+                f"📋 *Update — Ticket #{ticket_id}*\n\n"
+                f"Your complaint has been pending for {days_total} days.\n"
+                f"SwachhBot has sent another reminder to the "
+                f"BBMP Commissioner.\n\n"
+                f"We have not forgotten your complaint. 🙏"
+            )
+
+            # Update last_escalated_at so reminder fires again in 24 hours
+            cur.execute("""
+                UPDATE complaints
+                SET last_escalated_at = NOW()
+                WHERE id = %s
+            """, (comp_id,))
+
+            print(f"Commissioner reminder sent: {ticket_id} — Day {days_total}")
 
         conn.commit()
         cur.close()

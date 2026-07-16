@@ -23,7 +23,8 @@ const STATUS_COLORS = {
   'pending_citizen': '#8B5CF6',
   'resolved': '#10B981',
   'resolved_certified': '#059669',
-  'reactivated': '#EF4444'
+  'reactivated': '#EF4444',
+  'stuck': '#94A3B8'
 }
 
 const STATUS_LABELS = {
@@ -33,7 +34,8 @@ const STATUS_LABELS = {
   'pending_citizen': 'Awaiting Citizen',
   'resolved': 'Resolved',
   'resolved_certified': 'Certified ✓',
-  'reactivated': 'Reactivated'
+  'reactivated': 'Reactivated',
+  'stuck': 'No Response ⚠️'
 }
 
 const ISSUE_ICONS = {
