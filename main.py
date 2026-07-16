@@ -39,7 +39,7 @@ async def check_escalations():
         conn = get_connection()
         cur = conn.cursor()
 
-        # Check complaints with no action taken
+        # Case 1: No action taken
         cur.execute("""
             SELECT c.id, c.ticket_id, c.citizen_phone, c.ward,
                    c.department, c.escalation_level, c.filed_at,
@@ -57,25 +57,37 @@ async def check_escalations():
              level, filed_at, sla_hours, last_escalated_at) = row
 
             hours_open = (datetime.now() - filed_at).total_seconds() / 3600
-
-            # Check if SLA has been exceeded
             if hours_open < sla_hours:
-                continue  # not yet time to escalate
+                continue
 
-            # Check if already escalated at this level
-            # by seeing if last_escalated_at is after the SLA breach time
-            sla_breach_time = filed_at + __import__('datetime').timedelta(hours=sla_hours)
+            from datetime import timedelta
+            sla_breach_time = filed_at + timedelta(hours=sla_hours)
             if last_escalated_at and last_escalated_at > sla_breach_time:
-                continue  # already escalated for this SLA breach
+                continue
 
             new_level = level + 1
-            msg_citizen = (
+            escalate_to = 'Ward Councillor' if new_level == 1 else 'Commissioner'
+
+            # Notify citizen
+            send_whatsapp(phone,
                 f"⚠️ *Escalation Notice — Ticket #{ticket_id}*\n\n"
                 f"No action taken after {int(hours_open)} hours.\n"
-                f"Escalated to "
-                f"{'Ward Councillor' if new_level == 1 else 'Commissioner'}."
+                f"Escalated to {escalate_to}.\n\n"
+                f"We'll keep following up until this is resolved. 🙏"
             )
-            send_whatsapp(phone, msg_citizen)
+
+            # Notify councillor or commissioner
+            from agents.execution import COUNCILLOR_NUMBER, COMMISSIONER_NUMBER
+            official_number = COUNCILLOR_NUMBER if new_level == 1 else COMMISSIONER_NUMBER
+            send_whatsapp(official_number,
+                f"📋 *Escalation Alert — SwachhBot*\n\n"
+                f"Ticket #{ticket_id} has been escalated to you.\n"
+                f"Reason: No action taken by department after {int(hours_open)} hours.\n"
+                f"Ward: {ward}\n"
+                f"Department: {dept}\n\n"
+                f"Please log into the dashboard and take action."
+            )
+
             cur.execute("""
                 UPDATE complaints
                 SET escalation_level = %s,
@@ -84,12 +96,12 @@ async def check_escalations():
             """, (new_level, comp_id))
             print(f"No-action escalation: {ticket_id} → Level {new_level}")
 
-        # Check complaints where action started but not resolved
+        # Case 2: Action started but not resolved
         cur.execute("""
             SELECT c.id, c.ticket_id, c.citizen_phone, c.ward,
                    c.department, c.escalation_level,
                    c.action_started_at, c.action_sla_hours,
-                   c.last_escalated_at
+                   c.last_escalated_at, c.action_started_by
             FROM complaints c
             WHERE c.status = 'action_started'
             AND c.action_started_at IS NOT NULL
@@ -100,33 +112,48 @@ async def check_escalations():
 
         for row in in_action:
             (comp_id, ticket_id, phone, ward, dept, level,
-             action_at, action_sla, last_escalated_at) = row
+             action_at, action_sla, last_escalated_at, started_by) = row
 
             hours_since_action = (datetime.now() - action_at).total_seconds() / 3600
-
-            # Check if action SLA has been exceeded
             if hours_since_action < action_sla:
-                continue  # not yet time to escalate
+                continue
 
-            # Check if already escalated for this action SLA breach
             from datetime import timedelta
-            action_sla_breach_time = action_at + timedelta(hours=action_sla)
-            if last_escalated_at and last_escalated_at > action_sla_breach_time:
-                continue  # already escalated for this breach
+            action_breach = action_at + timedelta(hours=action_sla)
+            if last_escalated_at and last_escalated_at > action_breach:
+                continue
 
             new_level = level + 1
-            msg_citizen = (
+            escalate_to = 'Ward Councillor' if new_level == 1 else 'Commissioner'
+
+            # Notify citizen — different message: action started but incomplete
+            send_whatsapp(phone,
                 f"⚠️ *Escalation Notice — Ticket #{ticket_id}*\n\n"
-                f"Action was started but issue not resolved after "
-                f"{int(hours_since_action)} hours.\n"
-                f"Escalated to "
-                f"{'Ward Councillor' if new_level == 1 else 'Commissioner'}."
+                f"Action was started by the department {int(hours_since_action)} hours ago "
+                f"but the issue has not been resolved yet.\n"
+                f"Escalated to {escalate_to} for follow-up.\n\n"
+                f"We'll keep following up until this is resolved. 🙏"
             )
-            send_whatsapp(phone, msg_citizen)
+
+            # Notify councillor or commissioner — different message
+            from agents.execution import COUNCILLOR_NUMBER, COMMISSIONER_NUMBER
+            official_number = COUNCILLOR_NUMBER if new_level == 1 else COMMISSIONER_NUMBER
+            send_whatsapp(official_number,
+                f"📋 *Escalation Alert — SwachhBot*\n\n"
+                f"Ticket #{ticket_id} has been escalated to you.\n"
+                f"Reason: Action was started by {started_by or dept} "
+                f"{int(hours_since_action)} hours ago but issue remains unresolved.\n"
+                f"Ward: {ward}\n"
+                f"Department: {dept}\n\n"
+                f"Please log into the dashboard and take over."
+            )
+
             cur.execute("""
                 UPDATE complaints
                 SET escalation_level = %s,
                     status = 'filed',
+                    action_started_at = NULL,
+                    action_started_by = NULL,
                     last_escalated_at = NOW()
                 WHERE id = %s
             """, (new_level, comp_id))
@@ -405,21 +432,37 @@ async def start_action(ticket_id: str, data: dict):
         conn = get_connection()
         cur = conn.cursor()
 
+        # Check if action already started by someone else
         cur.execute("""
-            SELECT c.issue_type, c.severity,
-                   s.no_action_hours, s.action_started_hours
-            FROM complaints c
-            JOIN sla_config s ON c.issue_type = s.issue_type
-                AND c.severity = s.severity
-            WHERE c.ticket_id = %s
+            SELECT action_started_by, action_started_at, status,
+                   issue_type, severity, escalation_level
+            FROM complaints
+            WHERE ticket_id = %s
         """, (ticket_id,))
         row = cur.fetchone()
 
         if not row:
             return {"error": "Ticket not found"}
 
-        issue_type, severity, no_action_hours, action_sla_hours = row
+        started_by, started_at, status, issue_type, severity, level = row
 
+        # Check if already locked by someone
+        if started_by and status == 'action_started':
+            return {
+                "error": f"Action already started by {started_by}",
+                "locked": True,
+                "started_by": started_by
+            }
+
+        # Get SLA config
+        cur.execute("""
+            SELECT action_started_hours FROM sla_config
+            WHERE issue_type = %s AND severity = %s
+        """, (issue_type, severity))
+        sla_row = cur.fetchone()
+        action_sla_hours = sla_row[0] if sla_row else 24
+
+        # Lock complaint to this user
         cur.execute("""
             UPDATE complaints
             SET status = 'action_started',
@@ -443,8 +486,13 @@ async def start_action(ticket_id: str, data: dict):
                 f"Ward: {ward}\n\n"
                 f"Expected resolution within {action_sla_hours} hours."
             )
-            return {"message": "Action started"}
+            return {
+                "message": "Action started",
+                "action_sla_hours": action_sla_hours,
+                "locked_to": data.get('started_by')
+            }
         return {"error": "Ticket not found"}
+
     except Exception as e:
         return {"error": str(e)}
 
