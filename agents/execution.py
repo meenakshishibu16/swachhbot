@@ -39,8 +39,11 @@ def file_complaint(citizen_phone: str, asset_id: str,
         cur.execute("""
             INSERT INTO complaints
             (asset_id, citizen_phone, photo_url, ticket_id,
-             issue_type, severity, ward, department, status)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'filed')
+            issue_type, severity, ward, department, status,
+            decision_recommendation, failure_probability,
+            decision_action, decision_reasoning)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'filed',
+                    %s, %s, %s, %s)
         """, (
             asset_id,
             citizen_phone,
@@ -49,7 +52,11 @@ def file_complaint(citizen_phone: str, asset_id: str,
             vision['issue_type'],
             vision['severity'],
             ward,
-            vision['department']
+            vision['department'],
+            decision.get('recommendation'),
+            decision.get('failure_probability'),
+            decision.get('action'),
+            decision.get('reasoning')
         ))
 
         conn.commit()

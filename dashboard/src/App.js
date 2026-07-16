@@ -17,18 +17,41 @@ L.Icon.Default.mergeOptions({
 const API_URL = 'https://swachhbot-production.up.railway.app'
 
 const STATUS_COLORS = {
-  'filed': '#534AB7',
-  'action_started': '#F5A623',
-  'pending_citizen': '#4B9EF5',
-  'resolved': '#4CAF50',
-  'resolved_certified': '#2E7D32',
-  'reactivated': '#ff6b6b'
+  'filed': '#3B82F6',
+  'action_started': '#F59E0B',
+  'pending_citizen': '#8B5CF6',
+  'resolved': '#10B981',
+  'resolved_certified': '#059669',
+  'reactivated': '#EF4444'
+}
+
+const STATUS_LABELS = {
+  'filed': 'Filed',
+  'action_started': 'In Progress',
+  'pending_citizen': 'Awaiting Citizen',
+  'resolved': 'Resolved',
+  'resolved_certified': 'Certified ✓',
+  'reactivated': 'Reactivated'
+}
+
+const ISSUE_ICONS = {
+  'garbage': '🗑️',
+  'pothole': '🚧',
+  'streetlight': '💡',
+  'drainage': '🌊',
+  'other': '📋'
 }
 
 const getIcon = (status) => L.divIcon({
   className: '',
-  html: `<div style="background:${STATUS_COLORS[status] || '#534AB7'};width:14px;height:14px;border-radius:50%;border:2px solid white;box-shadow:0 0 4px rgba(0,0,0,0.4)"></div>`,
-  iconSize: [14, 14]
+  html: `<div style="
+    background:${STATUS_COLORS[status] || '#3B82F6'};
+    width:12px;height:12px;
+    border-radius:50%;
+    border:2px solid white;
+    box-shadow:0 2px 4px rgba(0,0,0,0.3)
+  "></div>`,
+  iconSize: [12, 12]
 })
 
 export default function App() {
@@ -36,11 +59,12 @@ export default function App() {
   const [complaints, setComplaints] = useState([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('list')
+  const [filterStatus, setFilterStatus] = useState('all')
 
   const fetchComplaints = async () => {
     try {
       const res = await axios.get(`${API_URL}/complaints`)
-      setComplaints(res.data)
+      setComplaints(Array.isArray(res.data) ? res.data : [])
       setLoading(false)
     } catch (e) {
       console.error(e)
@@ -56,21 +80,23 @@ export default function App() {
     }
   }, [user])
 
-  // Filter complaints based on role
   const getFilteredComplaints = () => {
     if (!user) return []
+    let filtered = complaints
+
     if (user.role === 'department') {
-      return complaints.filter(c => c.issue_type === user.department)
+      filtered = filtered.filter(c => c.issue_type === user.department)
+    } else if (user.role === 'councillor') {
+      filtered = filtered.filter(c => c.ward === user.ward && c.escalation_level >= 1)
+    } else if (user.role === 'commissioner') {
+      filtered = filtered.filter(c => c.escalation_level >= 2)
     }
-    if (user.role === 'councillor') {
-      return complaints.filter(c =>
-        c.ward === user.ward && c.escalation_level >= 1
-      )
+
+    if (filterStatus !== 'all') {
+      filtered = filtered.filter(c => c.status === filterStatus)
     }
-    if (user.role === 'commissioner') {
-      return complaints.filter(c => c.escalation_level >= 2)
-    }
-    return complaints
+
+    return filtered
   }
 
   const handleLogout = async () => {
@@ -81,64 +107,157 @@ export default function App() {
   const filtered = getFilteredComplaints()
 
   const stats = {
-    total: filtered.length,
-    active: filtered.filter(c => c.status === 'filed' || c.status === 'reactivated').length,
-    inProgress: filtered.filter(c => c.status === 'action_started').length,
-    resolved: filtered.filter(c => c.status === 'resolved' || c.status === 'resolved_certified').length,
+    total: getFilteredComplaints().length,
+    active: getFilteredComplaints().filter(c => c.status === 'filed' || c.status === 'reactivated').length,
+    inProgress: getFilteredComplaints().filter(c => c.status === 'action_started').length,
+    resolved: getFilteredComplaints().filter(c => c.status === 'resolved' || c.status === 'resolved_certified').length,
   }
 
   if (!user) return <Login onLogin={setUser} />
 
+  const roleLabel = {
+    department: `${user.department?.toUpperCase()} Dept`,
+    councillor: `Ward Councillor · ${user.ward}`,
+    commissioner: 'Commissioner'
+  }
+
   return (
-    <div style={{ fontFamily: 'Arial, sans-serif', height: '100vh', display: 'flex', flexDirection: 'column', background: '#0f0a1e' }}>
+    <div style={{ fontFamily: "'Inter', -apple-system, sans-serif", height: '100vh', display: 'flex', flexDirection: 'column', background: '#F8FAFC' }}>
 
       {/* Header */}
-      <div style={{ background: '#1a1040', padding: '12px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderBottom: '1px solid #534AB7' }}>
-        <div>
-          <h1 style={{ color: '#fff', margin: 0, fontSize: '18px' }}>🗑️ SwachhBot — BBMP Dashboard</h1>
-          <p style={{ color: '#9b97c9', margin: 0, fontSize: '12px' }}>
-            Logged in as <strong style={{ color: '#F5A623' }}>{user.name}</strong> ·
-            Role: <strong style={{ color: '#534AB7' }}>{user.role.toUpperCase()}</strong>
-            {user.department && ` · ${user.department.toUpperCase()}`}
-            {user.ward && ` · ${user.ward}`}
-          </p>
+      <div style={{
+        background: '#FFFFFF',
+        padding: '0 24px',
+        height: '60px',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        borderBottom: '1px solid #E2E8F0',
+        boxShadow: '0 1px 3px rgba(0,0,0,0.05)'
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{
+            width: '32px', height: '32px',
+            background: '#1E40AF',
+            borderRadius: '8px',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '16px'
+          }}>🏙️</div>
+          <div>
+            <div style={{ fontSize: '15px', fontWeight: '600', color: '#0F172A' }}>SwachhBot</div>
+            <div style={{ fontSize: '11px', color: '#64748B' }}>BBMP Grievance Dashboard</div>
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={fetchComplaints} style={{ background: '#534AB7', color: '#fff', border: 'none', padding: '8px 14px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}>
-            🔄 Refresh
-          </button>
-          <button onClick={handleLogout} style={{ background: 'transparent', color: '#9b97c9', border: '1px solid #534AB7', padding: '8px 14px', borderRadius: '6px', cursor: 'pointer', fontSize: '13px' }}>
-            Logout
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: '13px', fontWeight: '500', color: '#0F172A' }}>{user.name}</div>
+            <div style={{ fontSize: '11px', color: '#64748B' }}>{roleLabel[user.role]}</div>
+          </div>
+          <div style={{
+            width: '32px', height: '32px',
+            background: '#EFF6FF',
+            borderRadius: '50%',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '14px', fontWeight: '600', color: '#1E40AF'
+          }}>
+            {user.name.charAt(0)}
+          </div>
+          <button onClick={handleLogout} style={{
+            padding: '6px 14px',
+            background: 'transparent',
+            color: '#64748B',
+            border: '1px solid #E2E8F0',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '13px'
+          }}>
+            Sign out
           </button>
         </div>
       </div>
 
-      {/* Stats */}
-      <div style={{ display: 'flex', gap: '12px', padding: '12px 24px', background: '#1a1040', borderBottom: '1px solid #2a2060' }}>
+      {/* Stats bar */}
+      <div style={{
+        background: '#FFFFFF',
+        padding: '16px 24px',
+        display: 'flex',
+        gap: '16px',
+        borderBottom: '1px solid #E2E8F0',
+        alignItems: 'center'
+      }}>
         {[
-          { label: 'Total', value: stats.total, color: '#9b97c9' },
-          { label: 'Active', value: stats.active, color: '#534AB7' },
-          { label: 'In Progress', value: stats.inProgress, color: '#F5A623' },
-          { label: 'Resolved', value: stats.resolved, color: '#4CAF50' },
+          { label: 'Total Complaints', value: stats.total, color: '#1E40AF', bg: '#EFF6FF' },
+          { label: 'Active', value: stats.active, color: '#1E40AF', bg: '#EFF6FF' },
+          { label: 'In Progress', value: stats.inProgress, color: '#B45309', bg: '#FFFBEB' },
+          { label: 'Resolved', value: stats.resolved, color: '#065F46', bg: '#ECFDF5' },
         ].map(s => (
-          <div key={s.label} style={{ background: '#0f0a1e', border: '1px solid #2a2060', borderRadius: '8px', padding: '10px 20px', textAlign: 'center', minWidth: '80px' }}>
-            <div style={{ color: s.color, fontSize: '22px', fontWeight: 'bold' }}>{s.value}</div>
-            <div style={{ color: '#6b6799', fontSize: '11px' }}>{s.label}</div>
+          <div key={s.label} style={{
+            background: s.bg,
+            borderRadius: '8px',
+            padding: '10px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            minWidth: '140px'
+          }}>
+            <div style={{ fontSize: '24px', fontWeight: '700', color: s.color }}>{s.value}</div>
+            <div style={{ fontSize: '12px', color: s.color, opacity: 0.8 }}>{s.label}</div>
           </div>
         ))}
 
-        {/* Tabs */}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: '8px', alignItems: 'center' }}>
-          {['list', 'map'].map(tab => (
-            <button key={tab} onClick={() => setActiveTab(tab)} style={{
-              background: activeTab === tab ? '#534AB7' : 'transparent',
-              color: '#fff', border: '1px solid #534AB7',
-              padding: '6px 16px', borderRadius: '6px', cursor: 'pointer',
-              textTransform: 'capitalize', fontSize: '13px'
-            }}>
-              {tab === 'list' ? '📋 List' : '🗺️ Map'}
-            </button>
-          ))}
+          {/* Status filter */}
+          <select
+            value={filterStatus}
+            onChange={e => setFilterStatus(e.target.value)}
+            style={{
+              padding: '7px 12px',
+              border: '1px solid #E2E8F0',
+              borderRadius: '6px',
+              fontSize: '13px',
+              color: '#374151',
+              background: '#fff',
+              cursor: 'pointer'
+            }}
+          >
+            <option value="all">All Status</option>
+            <option value="filed">Filed</option>
+            <option value="action_started">In Progress</option>
+            <option value="pending_citizen">Awaiting Citizen</option>
+            <option value="resolved">Resolved</option>
+            <option value="resolved_certified">Certified</option>
+            <option value="reactivated">Reactivated</option>
+          </select>
+
+          {/* View toggle */}
+          <div style={{ display: 'flex', border: '1px solid #E2E8F0', borderRadius: '6px', overflow: 'hidden' }}>
+            {['list', 'map'].map(tab => (
+              <button key={tab} onClick={() => setActiveTab(tab)} style={{
+                padding: '7px 16px',
+                background: activeTab === tab ? '#1E40AF' : '#fff',
+                color: activeTab === tab ? '#fff' : '#374151',
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: activeTab === tab ? '500' : '400'
+              }}>
+                {tab === 'list' ? '☰ List' : '🗺 Map'}
+              </button>
+            ))}
+          </div>
+
+          <button onClick={fetchComplaints} style={{
+            padding: '7px 14px',
+            background: '#1E40AF',
+            color: '#fff',
+            border: 'none',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '13px'
+          }}>
+            ↻ Refresh
+          </button>
         </div>
       </div>
 
@@ -147,30 +266,58 @@ export default function App() {
 
         {/* List view */}
         {activeTab === 'list' && (
-          <div style={{ flex: 1, overflowY: 'auto', padding: '16px 24px' }}>
-            {loading && <p style={{ color: '#9b97c9', textAlign: 'center' }}>Loading...</p>}
-            {!loading && filtered.length === 0 && (
-              <div style={{ textAlign: 'center', color: '#9b97c9', marginTop: '60px' }}>
-                <p style={{ fontSize: '32px' }}>✅</p>
-                <p>No complaints in your queue right now.</p>
+          <div style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+
+            {loading && (
+              <div style={{ textAlign: 'center', padding: '60px', color: '#64748B' }}>
+                Loading complaints...
               </div>
             )}
-            {filtered.map(c => (
-              <ComplaintCard
-                key={c.ticket_id}
-                complaint={c}
-                user={user}
-                onUpdate={fetchComplaints}
-              />
-            ))}
+
+            {!loading && filtered.length === 0 && (
+              <div style={{
+                textAlign: 'center', padding: '60px',
+                background: '#fff', borderRadius: '12px',
+                border: '1px solid #E2E8F0'
+              }}>
+                <div style={{ fontSize: '40px', marginBottom: '12px' }}>✅</div>
+                <div style={{ fontSize: '16px', fontWeight: '500', color: '#0F172A' }}>
+                  No complaints in your queue
+                </div>
+                <div style={{ fontSize: '13px', color: '#64748B', marginTop: '4px' }}>
+                  All issues have been addressed
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '16px' }}>
+              {filtered.map(c => (
+                <ComplaintCard
+                  key={c.ticket_id}
+                  complaint={c}
+                  user={user}
+                  onUpdate={fetchComplaints}
+                  statusColors={STATUS_COLORS}
+                  statusLabels={STATUS_LABELS}
+                  issueIcons={ISSUE_ICONS}
+                />
+              ))}
+            </div>
           </div>
         )}
 
         {/* Map view */}
         {activeTab === 'map' && (
           <div style={{ flex: 1 }}>
-            <MapContainer center={[12.9716, 77.5946]} zoom={12} style={{ height: '100%', width: '100%' }}>
-              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+            <MapContainer
+              center={[12.9716, 77.5946]}
+              zoom={12}
+              style={{ height: '100%', width: '100%' }}
+            >
+              <TileLayer
+                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                attribution='&copy; OpenStreetMap contributors'
+              />
               {filtered.map(c => (
                 <Marker
                   key={c.ticket_id}
@@ -178,10 +325,31 @@ export default function App() {
                   icon={getIcon(c.status)}
                 >
                   <Popup>
-                    <strong>#{c.ticket_id}</strong><br />
-                    {c.issue_type?.toUpperCase()} · {c.severity}<br />
-                    {c.ward}<br />
-                    Status: {c.status}
+                    <div style={{ minWidth: '200px', fontFamily: 'Inter, sans-serif' }}>
+                      <div style={{ fontWeight: '600', fontSize: '13px', marginBottom: '6px' }}>
+                        {ISSUE_ICONS[c.issue_type]} #{c.ticket_id}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#374151', marginBottom: '4px' }}>
+                        {c.issue_type?.toUpperCase()} · {c.severity} severity
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#374151', marginBottom: '4px' }}>
+                        📍 {c.ward}
+                      </div>
+                      <div style={{ fontSize: '12px', color: '#374151', marginBottom: '8px' }}>
+                        🏢 {c.department}
+                      </div>
+                      <div style={{
+                        display: 'inline-block',
+                        padding: '2px 8px',
+                        background: STATUS_COLORS[c.status] + '20',
+                        color: STATUS_COLORS[c.status],
+                        borderRadius: '999px',
+                        fontSize: '11px',
+                        fontWeight: '500'
+                      }}>
+                        {STATUS_LABELS[c.status]}
+                      </div>
+                    </div>
                   </Popup>
                 </Marker>
               ))}
@@ -190,16 +358,26 @@ export default function App() {
         )}
       </div>
 
-      {/* Legend */}
-      <div style={{ background: '#1a1040', padding: '8px 24px', borderTop: '1px solid #534AB7', display: 'flex', gap: '16px', flexWrap: 'wrap' }}>
+      {/* Footer / Legend */}
+      <div style={{
+        background: '#FFFFFF',
+        padding: '10px 24px',
+        borderTop: '1px solid #E2E8F0',
+        display: 'flex',
+        gap: '20px',
+        alignItems: 'center'
+      }}>
         {Object.entries(STATUS_COLORS).map(([status, color]) => (
           <div key={status} style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <div style={{ width: '10px', height: '10px', borderRadius: '50%', background: color }} />
-            <span style={{ color: '#9b97c9', fontSize: '11px', textTransform: 'capitalize' }}>
-              {status.replace('_', ' ')}
+            <div style={{ width: '8px', height: '8px', borderRadius: '50%', background: color }} />
+            <span style={{ color: '#64748B', fontSize: '11px' }}>
+              {STATUS_LABELS[status]}
             </span>
           </div>
         ))}
+        <span style={{ color: '#CBD5E1', fontSize: '11px', marginLeft: 'auto' }}>
+          Auto-refreshes every 30s
+        </span>
       </div>
     </div>
   )

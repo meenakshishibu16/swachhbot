@@ -329,6 +329,9 @@ async def get_complaints():
                 c.action_started_at, c.action_started_by,
                 c.resolved_note, c.resolved_by,
                 c.resolved_photo_url, c.reactivated_count,
+                c.photo_url,
+                c.decision_recommendation, c.failure_probability,
+                c.decision_action, c.decision_reasoning,
                 ST_Y(a.location::geometry) as lat,
                 ST_X(a.location::geometry) as lng
             FROM complaints c
@@ -343,23 +346,28 @@ async def get_complaints():
         complaints = []
         for row in rows:
             complaints.append({
-                "ticket_id": row[0],
-                "issue_type": row[1],
-                "severity": row[2],
-                "ward": row[3],
-                "department": row[4],
-                "status": row[5],
-                "escalation_level": row[6],
-                "filed_at": str(row[7]),
-                "action_started_at": str(row[8]) if row[8] else None,
-                "action_started_by": row[9],
-                "resolved_note": row[10],
-                "resolved_by": row[11],
-                "resolved_photo_url": row[12],
-                "reactivated_count": row[13] or 0,
-                "lat": float(row[14]) if row[14] else 12.9716,
-                "lng": float(row[15]) if row[15] else 77.5946
-            })
+            "ticket_id": row[0],
+            "issue_type": row[1],
+            "severity": row[2],
+            "ward": row[3],
+            "department": row[4],
+            "status": row[5],
+            "escalation_level": row[6],
+            "filed_at": str(row[7]),
+            "action_started_at": str(row[8]) if row[8] else None,
+            "action_started_by": row[9],
+            "resolved_note": row[10],
+            "resolved_by": row[11],
+            "resolved_photo_url": row[12],
+            "reactivated_count": row[13] or 0,
+            "photo_url": row[14],
+            "decision_recommendation": row[15],
+            "failure_probability": row[16],
+            "decision_action": row[17],
+            "decision_reasoning": row[18],
+            "lat": float(row[19]) if row[19] else 12.9716,
+            "lng": float(row[20]) if row[20] else 77.5946
+        })
         return complaints
     except Exception as e:
         return {"error": str(e)}

@@ -22,8 +22,7 @@ export default function Login({ onLogin }) {
       return
     }
 
-    // Get user role from department_users table
-    const { data: userData } = await supabase
+    const { data: userData, error: userError } = await supabase
       .from('department_users')
       .select('*')
       .eq('email', email)
@@ -43,46 +42,68 @@ export default function Login({ onLogin }) {
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
-      background: '#0f0a1e'
+      background: '#F8FAFC',
+      fontFamily: "'Inter', -apple-system, sans-serif"
     }}>
       <div style={{
-        background: '#1a1040',
-        border: '1px solid #534AB7',
-        borderRadius: '12px',
+        background: '#FFFFFF',
+        border: '1px solid #E2E8F0',
+        borderRadius: '16px',
         padding: '40px',
-        width: '360px'
+        width: '380px',
+        boxShadow: '0 4px 24px rgba(0,0,0,0.06)'
       }}>
-        <h1 style={{ color: '#fff', margin: '0 0 8px', fontSize: '22px' }}>
-          🗑️ SwachhBot
-        </h1>
-        <p style={{ color: '#9b97c9', margin: '0 0 32px', fontSize: '13px' }}>
-          BBMP Official Dashboard
-        </p>
+        {/* Logo */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '32px' }}>
+          <div style={{
+            width: '40px', height: '40px',
+            background: '#1E40AF',
+            borderRadius: '10px',
+            display: 'flex', alignItems: 'center',
+            justifyContent: 'center', fontSize: '20px'
+          }}>🏙️</div>
+          <div>
+            <div style={{ fontSize: '18px', fontWeight: '700', color: '#0F172A' }}>SwachhBot</div>
+            <div style={{ fontSize: '12px', color: '#64748B' }}>BBMP Official Dashboard</div>
+          </div>
+        </div>
+
+        <div style={{ marginBottom: '8px' }}>
+          <h2 style={{ fontSize: '20px', fontWeight: '600', color: '#0F172A', margin: '0 0 4px' }}>
+            Sign in
+          </h2>
+          <p style={{ fontSize: '13px', color: '#64748B', margin: 0 }}>
+            Access your department's complaint queue
+          </p>
+        </div>
+
+        <div style={{ height: '1px', background: '#F1F5F9', margin: '20px 0' }} />
 
         <div style={{ marginBottom: '16px' }}>
-          <label style={{ color: '#9b97c9', fontSize: '12px', display: 'block', marginBottom: '6px' }}>
-            Email
+          <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '6px' }}>
+            Email address
           </label>
           <input
             type="email"
             value={email}
             onChange={e => setEmail(e.target.value)}
-            placeholder="your@bbmp.demo"
+            placeholder="name@bbmp.demo"
             style={{
               width: '100%',
               padding: '10px 12px',
-              background: '#0f0a1e',
-              border: '1px solid #534AB7',
-              borderRadius: '6px',
-              color: '#fff',
+              border: '1px solid #E2E8F0',
+              borderRadius: '8px',
               fontSize: '14px',
-              boxSizing: 'border-box'
+              color: '#0F172A',
+              background: '#F8FAFC',
+              boxSizing: 'border-box',
+              outline: 'none'
             }}
           />
         </div>
 
         <div style={{ marginBottom: '24px' }}>
-          <label style={{ color: '#9b97c9', fontSize: '12px', display: 'block', marginBottom: '6px' }}>
+          <label style={{ fontSize: '13px', fontWeight: '500', color: '#374151', display: 'block', marginBottom: '6px' }}>
             Password
           </label>
           <input
@@ -94,20 +115,29 @@ export default function Login({ onLogin }) {
             style={{
               width: '100%',
               padding: '10px 12px',
-              background: '#0f0a1e',
-              border: '1px solid #534AB7',
-              borderRadius: '6px',
-              color: '#fff',
+              border: '1px solid #E2E8F0',
+              borderRadius: '8px',
               fontSize: '14px',
-              boxSizing: 'border-box'
+              color: '#0F172A',
+              background: '#F8FAFC',
+              boxSizing: 'border-box',
+              outline: 'none'
             }}
           />
         </div>
 
         {error && (
-          <p style={{ color: '#ff6b6b', fontSize: '13px', marginBottom: '16px' }}>
-            {error}
-          </p>
+          <div style={{
+            background: '#FEF2F2',
+            border: '1px solid #FECACA',
+            borderRadius: '8px',
+            padding: '10px 12px',
+            marginBottom: '16px',
+            fontSize: '13px',
+            color: '#DC2626'
+          }}>
+            ⚠️ {error}
+          </div>
         )}
 
         <button
@@ -115,24 +145,55 @@ export default function Login({ onLogin }) {
           disabled={loading}
           style={{
             width: '100%',
-            padding: '12px',
-            background: loading ? '#3a3180' : '#534AB7',
+            padding: '11px',
+            background: loading ? '#93C5FD' : '#1E40AF',
             color: '#fff',
             border: 'none',
-            borderRadius: '6px',
+            borderRadius: '8px',
             fontSize: '14px',
+            fontWeight: '500',
             cursor: loading ? 'not-allowed' : 'pointer',
-            fontWeight: '500'
+            transition: 'background 0.15s'
           }}
         >
-          {loading ? 'Logging in...' : 'Login'}
+          {loading ? 'Signing in...' : 'Sign in →'}
         </button>
 
-        <div style={{ marginTop: '24px', padding: '12px', background: '#0f0a1e', borderRadius: '6px' }}>
-          <p style={{ color: '#6b6799', fontSize: '11px', margin: '0 0 8px' }}>Demo credentials:</p>
-          <p style={{ color: '#9b97c9', fontSize: '11px', margin: '2px 0' }}>swm@bbmp.demo / Demo@1234</p>
-          <p style={{ color: '#9b97c9', fontSize: '11px', margin: '2px 0' }}>councillor@bbmp.demo / Demo@1234</p>
-          <p style={{ color: '#9b97c9', fontSize: '11px', margin: '2px 0' }}>commissioner@bbmp.demo / Demo@1234</p>
+        {/* Demo credentials */}
+        <div style={{
+          marginTop: '24px',
+          padding: '16px',
+          background: '#F8FAFC',
+          borderRadius: '8px',
+          border: '1px solid #E2E8F0'
+        }}>
+          <div style={{ fontSize: '11px', fontWeight: '600', color: '#374151', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+            Demo credentials
+          </div>
+          {[
+            { label: 'Solid Waste Dept', email: 'swm@bbmp.demo' },
+            { label: 'Roads Dept', email: 'roads@bbmp.demo' },
+            { label: 'Electrical Dept', email: 'electrical@bbmp.demo' },
+            { label: 'Ward Councillor', email: 'councillor@bbmp.demo' },
+            { label: 'Commissioner', email: 'commissioner@bbmp.demo' },
+          ].map(c => (
+            <div
+              key={c.email}
+              onClick={() => setEmail(c.email)}
+              style={{
+                display: 'flex', justifyContent: 'space-between',
+                padding: '6px 0',
+                borderBottom: '1px solid #F1F5F9',
+                cursor: 'pointer'
+              }}
+            >
+              <span style={{ fontSize: '12px', color: '#374151' }}>{c.label}</span>
+              <span style={{ fontSize: '12px', color: '#1E40AF', fontFamily: 'monospace' }}>{c.email}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: '11px', color: '#94A3B8', marginTop: '8px' }}>
+            Password: Demo@1234 · Click email to autofill
+          </div>
         </div>
       </div>
     </div>
