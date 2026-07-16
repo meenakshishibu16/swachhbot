@@ -43,68 +43,94 @@ async def check_escalations():
         cur.execute("""
             SELECT c.id, c.ticket_id, c.citizen_phone, c.ward,
                    c.department, c.escalation_level, c.filed_at,
-                   s.no_action_hours
+                   s.no_action_hours, c.last_escalated_at
             FROM complaints c
             JOIN sla_config s ON c.issue_type = s.issue_type
                 AND c.severity = s.severity
-            WHERE c.status = 'filed'
-            OR c.status = 'reactivated'
+            WHERE (c.status = 'filed' OR c.status = 'reactivated')
+            AND c.escalation_level < 2
         """)
         no_action = cur.fetchall()
 
         for row in no_action:
-            comp_id, ticket_id, phone, ward, dept, level, filed_at, sla_hours = row
+            (comp_id, ticket_id, phone, ward, dept,
+             level, filed_at, sla_hours, last_escalated_at) = row
+
             hours_open = (datetime.now() - filed_at).total_seconds() / 3600
 
-            if hours_open >= sla_hours:
-                new_level = level + 1
-                msg_citizen = (
-                    f"⚠️ *Escalation Notice — Ticket #{ticket_id}*\n\n"
-                    f"No action taken after {int(hours_open)} hours.\n"
-                    f"Escalated to "
-                    f"{'Ward Councillor' if new_level == 1 else 'Commissioner'}."
-                )
-                send_whatsapp(phone, msg_citizen)
-                cur.execute("""
-                    UPDATE complaints
-                    SET escalation_level = %s
-                    WHERE id = %s
-                """, (new_level, comp_id))
-                print(f"No-action escalation: {ticket_id} → Level {new_level}")
+            # Check if SLA has been exceeded
+            if hours_open < sla_hours:
+                continue  # not yet time to escalate
+
+            # Check if already escalated at this level
+            # by seeing if last_escalated_at is after the SLA breach time
+            sla_breach_time = filed_at + __import__('datetime').timedelta(hours=sla_hours)
+            if last_escalated_at and last_escalated_at > sla_breach_time:
+                continue  # already escalated for this SLA breach
+
+            new_level = level + 1
+            msg_citizen = (
+                f"⚠️ *Escalation Notice — Ticket #{ticket_id}*\n\n"
+                f"No action taken after {int(hours_open)} hours.\n"
+                f"Escalated to "
+                f"{'Ward Councillor' if new_level == 1 else 'Commissioner'}."
+            )
+            send_whatsapp(phone, msg_citizen)
+            cur.execute("""
+                UPDATE complaints
+                SET escalation_level = %s,
+                    last_escalated_at = NOW()
+                WHERE id = %s
+            """, (new_level, comp_id))
+            print(f"No-action escalation: {ticket_id} → Level {new_level}")
 
         # Check complaints where action started but not resolved
         cur.execute("""
             SELECT c.id, c.ticket_id, c.citizen_phone, c.ward,
                    c.department, c.escalation_level,
-                   c.action_started_at, c.action_sla_hours
+                   c.action_started_at, c.action_sla_hours,
+                   c.last_escalated_at
             FROM complaints c
             WHERE c.status = 'action_started'
             AND c.action_started_at IS NOT NULL
             AND c.action_sla_hours IS NOT NULL
+            AND c.escalation_level < 2
         """)
         in_action = cur.fetchall()
 
         for row in in_action:
-            comp_id, ticket_id, phone, ward, dept, level, action_at, action_sla = row
+            (comp_id, ticket_id, phone, ward, dept, level,
+             action_at, action_sla, last_escalated_at) = row
+
             hours_since_action = (datetime.now() - action_at).total_seconds() / 3600
 
-            if hours_since_action >= action_sla:
-                new_level = level + 1
-                msg_citizen = (
-                    f"⚠️ *Escalation Notice — Ticket #{ticket_id}*\n\n"
-                    f"Action was started but issue not resolved after "
-                    f"{int(hours_since_action)} hours.\n"
-                    f"Escalated to "
-                    f"{'Ward Councillor' if new_level == 1 else 'Commissioner'}."
-                )
-                send_whatsapp(phone, msg_citizen)
-                cur.execute("""
-                    UPDATE complaints
-                    SET escalation_level = %s,
-                        status = 'filed'
-                    WHERE id = %s
-                """, (new_level, comp_id))
-                print(f"Action-incomplete escalation: {ticket_id} → Level {new_level}")
+            # Check if action SLA has been exceeded
+            if hours_since_action < action_sla:
+                continue  # not yet time to escalate
+
+            # Check if already escalated for this action SLA breach
+            from datetime import timedelta
+            action_sla_breach_time = action_at + timedelta(hours=action_sla)
+            if last_escalated_at and last_escalated_at > action_sla_breach_time:
+                continue  # already escalated for this breach
+
+            new_level = level + 1
+            msg_citizen = (
+                f"⚠️ *Escalation Notice — Ticket #{ticket_id}*\n\n"
+                f"Action was started but issue not resolved after "
+                f"{int(hours_since_action)} hours.\n"
+                f"Escalated to "
+                f"{'Ward Councillor' if new_level == 1 else 'Commissioner'}."
+            )
+            send_whatsapp(phone, msg_citizen)
+            cur.execute("""
+                UPDATE complaints
+                SET escalation_level = %s,
+                    status = 'filed',
+                    last_escalated_at = NOW()
+                WHERE id = %s
+            """, (new_level, comp_id))
+            print(f"Action-incomplete escalation: {ticket_id} → Level {new_level}")
 
         conn.commit()
         cur.close()
