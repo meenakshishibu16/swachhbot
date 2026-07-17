@@ -166,15 +166,16 @@ async def check_escalations():
             """, (new_level, comp_id))
             print(f"Action-incomplete escalation: {ticket_id} → Level {new_level}")
         
-        # Case 3: Commissioner hasn't acted — daily reminder
+        # Case 3: Commissioner hasn't acted — daily reminder (max 7)
         cur.execute("""
             SELECT c.id, c.ticket_id, c.citizen_phone, c.ward,
-                   c.department, c.filed_at, c.last_escalated_at
+                   c.department, c.filed_at, c.last_escalated_at,
+                   c.reminder_count
             FROM complaints c
             WHERE c.escalation_level = 2
             AND c.status NOT IN (
-                'resolved', 'resolved_certified', 
-                'pending_citizen'
+                'resolved', 'resolved_certified',
+                'pending_citizen', 'stuck'
             )
             AND c.last_escalated_at IS NOT NULL
         """)
@@ -182,7 +183,8 @@ async def check_escalations():
 
         for row in commissioner_level:
             (comp_id, ticket_id, phone, ward,
-             dept, filed_at, last_escalated_at) = row
+             dept, filed_at, last_escalated_at,
+             reminder_count) = row
 
             # Only remind every 24 hours
             hours_since_last = (
@@ -197,10 +199,35 @@ async def check_escalations():
             ).total_seconds() / 3600
             days_total = int(total_hours / 24)
 
+            # Cap at 7 reminders — then mark as stuck
+            if reminder_count >= 7:
+                cur.execute("""
+                    UPDATE complaints
+                    SET status = 'stuck'
+                    WHERE id = %s
+                """, (comp_id,))
+
+                send_whatsapp(phone,
+                    f"⚠️ *Ticket #{ticket_id} — No Response from BBMP*\n\n"
+                    f"Despite {reminder_count} reminders over {days_total} days, "
+                    f"BBMP has not resolved your complaint.\n\n"
+                    f"We recommend:\n"
+                    f"1️⃣ File on Karnataka IPGRS portal:\n"
+                    f"janaspandana.karnataka.gov.in\n"
+                    f"2️⃣ Contact Lokayukta: lokayukta.karnataka.gov.in\n"
+                    f"3️⃣ Call BBMP helpline: 1533\n\n"
+                    f"Your ticket #{ticket_id} is recorded and "
+                    f"can be used as reference. 🙏"
+                )
+                print(f"Complaint stuck: {ticket_id} — marked after 7 reminders")
+                continue
+
+            # Send reminder
             commissioner_number = get_contact('commissioner')
             if commissioner_number:
                 send_whatsapp(commissioner_number,
-                    f"🔴 *Unresolved Complaint — Day {days_total}*\n\n"
+                    f"🔴 *Unresolved Complaint — Day {days_total} "
+                    f"(Reminder {reminder_count + 1}/7)*\n\n"
                     f"Ticket #{ticket_id} remains unresolved "
                     f"at Commissioner level.\n"
                     f"Ward: {ward}\n"
@@ -210,23 +237,22 @@ async def check_escalations():
                     f"Immediate action required."
                 )
 
-            # Also remind citizen it's still being tracked
             send_whatsapp(phone,
                 f"📋 *Update — Ticket #{ticket_id}*\n\n"
                 f"Your complaint has been pending for {days_total} days.\n"
-                f"SwachhBot has sent another reminder to the "
-                f"BBMP Commissioner.\n\n"
+                f"SwachhBot has sent reminder {reminder_count + 1} of 7 "
+                f"to the BBMP Commissioner.\n\n"
                 f"We have not forgotten your complaint. 🙏"
             )
 
-            # Update last_escalated_at so reminder fires again in 24 hours
             cur.execute("""
                 UPDATE complaints
-                SET last_escalated_at = NOW()
+                SET last_escalated_at = NOW(),
+                    reminder_count = reminder_count + 1
                 WHERE id = %s
             """, (comp_id,))
 
-            print(f"Commissioner reminder sent: {ticket_id} — Day {days_total}")
+            print(f"Commissioner reminder {reminder_count + 1}/7: {ticket_id}")
 
         conn.commit()
         cur.close()

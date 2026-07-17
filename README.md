@@ -276,20 +276,9 @@ Marked as Stuck — citizen directed to IPGRS portal
 
 ---
 
-## 👥 Team
+## 👥 Built By
 
-**[Your Team Name]**
-- [Member 1] — [Role]
-- [Member 2] — [Role]
+**Meenakshi Shibu**
 
----
-
-## 📄 License
-
-MIT License
-
----
-
-*Built for the "Building for Bharat with Agentic AI" Hackathon*
 
 > *SwachhBot — Because every complaint deserves a resolution, not just an acknowledgement.*
