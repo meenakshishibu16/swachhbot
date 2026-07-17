@@ -11,7 +11,7 @@ export default function Login({ onLogin }) {
     setLoading(true)
     setError('')
 
-    const { data, error } = await supabase.auth.signInWithPassword({
+    const { error } = await supabase.auth.signInWithPassword({
       email,
       password
     })
@@ -22,7 +22,7 @@ export default function Login({ onLogin }) {
       return
     }
 
-    const { data: userData, error: userError } = await supabase
+    const { data: userData } = await supabase
       .from('department_users')
       .select('*')
       .eq('email', email)
