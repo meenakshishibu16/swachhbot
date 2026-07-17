@@ -73,44 +73,52 @@ def notify_department(issue_type: str, ticket_id: str, ward: str,
                       severity: str, photo_url: str,
                       decision: dict, memory: dict):
     """Notify department when new complaint is filed"""
-    from db.connection import get_contact
-    dept_number = get_contact('department', department=issue_type)
-    if not dept_number:
-        print(f"No contact found for department: {issue_type}")
-        return
+    try:
+        from db.connection import get_contact
+        print(f"Looking up contact for department: {issue_type}")
+        dept_number = get_contact('department', department=issue_type)
+        print(f"Department contact found: {dept_number}")
+        
+        if not dept_number:
+            print(f"No contact found for department: {issue_type}")
+            return
 
-    history_line = ""
-    if memory.get('is_recurring'):
-        history_line = (
-            f"\n⚠️ Recurring issue — reported "
-            f"{memory['complaint_count']} times before."
+        history_line = ""
+        if memory.get('is_recurring'):
+            history_line = (
+                f"\n⚠️ Recurring issue — reported "
+                f"{memory['complaint_count']} times before."
+            )
+
+        decision_line = ""
+        if decision.get('recommendation') == 'permanent_fix':
+            decision_line = (
+                f"\n🔧 AI recommends: Permanent fix "
+                f"(failure probability: {decision.get('failure_probability')}%)"
+            )
+        else:
+            decision_line = (
+                f"\n🩹 AI recommends: Patch repair "
+                f"(failure probability: {decision.get('failure_probability')}%)"
+            )
+
+        msg = (
+            f"📋 *New Complaint — SwachhBot*\n\n"
+            f"Ticket: #{ticket_id}\n"
+            f"Issue: {issue_type.title()} (Severity: {severity})\n"
+            f"Ward: {ward}"
+            f"{history_line}"
+            f"{decision_line}\n\n"
+            f"Photo: {photo_url}\n\n"
+            f"Please log into the dashboard to take action.\n"
+            f"SLA clock has started. ⏱️"
         )
+        print(f"Sending department notification to {dept_number}")
+        send_whatsapp(dept_number, msg)
+        print(f"Department notification sent successfully")
 
-    decision_line = ""
-    if decision.get('recommendation') == 'permanent_fix':
-        decision_line = (
-            f"\n🔧 AI recommends: Permanent fix "
-            f"(failure probability: {decision.get('failure_probability')}%)"
-        )
-    else:
-        decision_line = (
-            f"\n🩹 AI recommends: Patch repair "
-            f"(failure probability: {decision.get('failure_probability')}%)"
-        )
-
-    msg = (
-        f"📋 *New Complaint — SwachhBot*\n\n"
-        f"Ticket: #{ticket_id}\n"
-        f"Issue: {issue_type.title()} (Severity: {severity})\n"
-        f"Ward: {ward}"
-        f"{history_line}"
-        f"{decision_line}\n\n"
-        f"Photo: {photo_url}\n\n"
-        f"Please log into the dashboard to take action.\n"
-        f"SLA clock has started. ⏱️"
-    )
-    send_whatsapp(dept_number, msg)
-
+    except Exception as e:
+        print(f"notify_department error: {e}")
 
 def file_complaint(citizen_phone: str, asset_id: str,
                    photo_url: str, vision: dict,
