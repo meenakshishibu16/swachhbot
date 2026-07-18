@@ -6,6 +6,7 @@ import L from 'leaflet'
 import { supabase } from './supabase'
 import Login from './Login'
 import ComplaintCard from './ComplaintCard'
+import { useMap } from 'react-leaflet'
 
 delete L.Icon.Default.prototype._getIconUrl
 L.Icon.Default.mergeOptions({
@@ -46,6 +47,18 @@ const ISSUE_ICONS = {
   'other': '📋'
 }
 
+const highlightIcon = L.divIcon({
+  className: '',
+  html: `<div style="
+    background: #EF4444;
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    border: 3px solid white;
+    box-shadow: 0 0 8px rgba(239,68,68,0.6)
+  "></div>`,
+  iconSize: [20, 20]
+})
+
 const getIcon = (status) => L.divIcon({
   className: '',
   html: `<div style="
@@ -57,6 +70,16 @@ const getIcon = (status) => L.divIcon({
   "></div>`,
   iconSize: [12, 12]
 })
+
+function MapRecenter({ lat, lng, zoom }) {
+  const map = useMap()
+  useEffect(() => {
+    if (lat && lng) {
+      map.setView([lat, lng], zoom)
+    }
+  }, [lat, lng, zoom, map])
+  return null
+}
 
 export default function App() {
   const [user, setUser] = useState(null)
@@ -129,6 +152,13 @@ export default function App() {
     department: `${user.department?.toUpperCase()} Dept`,
     councillor: `Ward Councillor · ${user.ward}`,
     commissioner: 'Commissioner'
+  }
+
+  const [highlightedComplaint, setHighlightedComplaint] = useState(null)
+
+  const handleViewOnMap = (complaint) => {
+    setHighlightedComplaint(complaint)
+    setActiveTab('map')  // switches to map view
   }
 
   return (
@@ -307,6 +337,7 @@ export default function App() {
                   complaint={c}
                   user={user}
                   onUpdate={fetchComplaints}
+                  onViewOnMap={handleViewOnMap}
                   statusColors={STATUS_COLORS}
                   statusLabels={STATUS_LABELS}
                   issueIcons={ISSUE_ICONS}
@@ -320,46 +351,37 @@ export default function App() {
         {activeTab === 'map' && (
           <div style={{ flex: 1 }}>
             <MapContainer
-              center={[12.9716, 77.5946]}
-              zoom={12}
+              center={
+                highlightedComplaint
+                  ? [highlightedComplaint.lat, highlightedComplaint.lng]
+                  : [12.9716, 77.5946]
+              }
+              zoom={highlightedComplaint ? 15 : 12}
               style={{ height: '100%', width: '100%' }}
             >
-              <TileLayer
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-                attribution='&copy; OpenStreetMap contributors'
-              />
+              <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+              
+              {/* ADD THIS HERE */}
+              {highlightedComplaint && (
+                <MapRecenter
+                  lat={highlightedComplaint.lat}
+                  lng={highlightedComplaint.lng}
+                  zoom={15}
+                />
+              )}
+
               {filtered.map(c => (
                 <Marker
                   key={c.ticket_id}
                   position={[c.lat || 12.9716, c.lng || 77.5946]}
-                  icon={getIcon(c.status)}
+                  icon={
+                    highlightedComplaint?.ticket_id === c.ticket_id
+                      ? highlightIcon
+                      : getIcon(c.status)
+                  }
                 >
                   <Popup>
-                    <div style={{ minWidth: '200px', fontFamily: 'Inter, sans-serif' }}>
-                      <div style={{ fontWeight: '600', fontSize: '13px', marginBottom: '6px' }}>
-                        {ISSUE_ICONS[c.issue_type]} #{c.ticket_id}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#374151', marginBottom: '4px' }}>
-                        {c.issue_type?.toUpperCase()} · {c.severity} severity
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#374151', marginBottom: '4px' }}>
-                        📍 {c.ward}
-                      </div>
-                      <div style={{ fontSize: '12px', color: '#374151', marginBottom: '8px' }}>
-                        🏢 {c.department}
-                      </div>
-                      <div style={{
-                        display: 'inline-block',
-                        padding: '2px 8px',
-                        background: STATUS_COLORS[c.status] + '20',
-                        color: STATUS_COLORS[c.status],
-                        borderRadius: '999px',
-                        fontSize: '11px',
-                        fontWeight: '500'
-                      }}>
-                        {STATUS_LABELS[c.status]}
-                      </div>
-                    </div>
+                    ...
                   </Popup>
                 </Marker>
               ))}

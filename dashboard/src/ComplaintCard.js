@@ -381,6 +381,29 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, statusColo
         )}
       </div>
 
+        {/* Location button */}
+        {c.lat && c.lng && (
+        <div
+            onClick={() => onViewOnMap && onViewOnMap(c)}
+            style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px',
+            fontSize: '12px',
+            color: '#1E40AF',
+            cursor: 'pointer',
+            marginTop: '4px',
+            padding: '3px 8px',
+            background: '#EFF6FF',
+            borderRadius: '4px',
+            border: '1px solid #BFDBFE',
+            width: 'fit-content'
+            }}
+        >
+            🗺️ View on map
+        </div>
+        )}
+
       {/* Resolve form */}
       {showResolveForm && (
         <div style={{
