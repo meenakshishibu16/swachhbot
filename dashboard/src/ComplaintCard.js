@@ -276,6 +276,11 @@ export default function ComplaintCard({ complaint: c, user, onUpdate, onViewOnMa
             🔄 Reactivated {c.reactivated_count} times
           </div>
         )}
+        {c.co_reporters_count > 0 && (
+            <div style={{ color: '#7C3AED', marginBottom: '4px' }}>
+            👥 {c.co_reporters_count} co-reporter{c.co_reporters_count > 1 ? 's' : ''} on this complaint
+            </div>
+        )}
       </div>
 
       {/* Dept actioning indicator for councillor/commissioner */}

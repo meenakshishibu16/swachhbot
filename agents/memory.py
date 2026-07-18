@@ -113,3 +113,53 @@ def create_or_update_asset(lat: float, lng: float,
     except Exception as e:
         print(f"Asset update error: {e}")
         return None
+    
+def check_duplicate(lat: float, lng: float, issue_type: str) -> str:
+    """Check if same issue reported at same spot in last 24 hours"""
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT c.ticket_id
+            FROM complaints c
+            JOIN assets a ON c.asset_id = a.id
+            WHERE c.issue_type = %s
+            AND c.status NOT IN ('resolved', 'resolved_certified')
+            AND c.filed_at > NOW() - INTERVAL '24 hours'
+            AND ST_DWithin(
+                a.location,
+                ST_MakePoint(%s, %s)::geography,
+                20
+            )
+            ORDER BY c.filed_at DESC
+            LIMIT 1
+        """, (issue_type, lng, lat))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        return row[0] if row else None
+    except Exception as e:
+        print(f"Duplicate check error: {e}")
+        return None
+
+
+def add_co_reporter(ticket_id: str, citizen_phone: str):
+    """Add citizen as co-reporter and notify them when resolved"""
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE complaints
+            SET co_reporters = CASE
+                WHEN co_reporters IS NULL OR co_reporters = ''
+                THEN %s
+                ELSE co_reporters || ',' || %s
+            END
+            WHERE ticket_id = %s
+        """, (citizen_phone, citizen_phone, ticket_id))
+        conn.commit()
+        cur.close()
+        conn.close()
+        print(f"Added co-reporter {citizen_phone} to {ticket_id}")
+    except Exception as e:
+        print(f"Co-reporter error: {e}")

@@ -382,7 +382,34 @@ export default function App() {
                   }
                 >
                   <Popup>
-                    ...
+                    <div style={{ minWidth: '180px', fontFamily: 'Arial, sans-serif', fontSize: '13px' }}>
+                      <div style={{ fontWeight: '600', marginBottom: '6px', color: '#0F172A' }}>
+                        {ISSUE_ICONS[c.issue_type]} #{c.ticket_id}
+                      </div>
+                      <div style={{ color: '#374151', marginBottom: '3px' }}>
+                        <strong>Issue:</strong> {c.issue_type?.toUpperCase()} · {c.severity}
+                      </div>
+                      <div style={{ color: '#374151', marginBottom: '3px' }}>
+                        <strong>Ward:</strong> {c.ward}
+                      </div>
+                      <div style={{ color: '#374151', marginBottom: '3px' }}>
+                        <strong>Dept:</strong> {c.department}
+                      </div>
+                      <div style={{ color: '#374151', marginBottom: '6px' }}>
+                        <strong>Filed:</strong> {new Date(c.filed_at).toLocaleDateString('en-IN')}
+                      </div>
+                      <div style={{
+                        display: 'inline-block',
+                        padding: '2px 8px',
+                        background: (STATUS_COLORS[c.status] || '#3B82F6') + '20',
+                        color: STATUS_COLORS[c.status] || '#3B82F6',
+                        borderRadius: '999px',
+                        fontSize: '11px',
+                        fontWeight: '500'
+                      }}>
+                        {STATUS_LABELS[c.status]}
+                      </div>
+                    </div>
                   </Popup>
                 </Marker>
               ))}
