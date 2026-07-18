@@ -1,6 +1,7 @@
 import os
 import base64
 import json
+import re
 import requests
 from groq import Groq
 from config import TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN
@@ -12,6 +13,78 @@ DEPARTMENT_MAP = {
     "drainage": "BBMP Stormwater Drains",
     "other": "BBMP General"
 }
+
+
+def apply_classification_rules(description: str) -> dict:
+    """Apply deterministic classification rules before falling back to LLM inference."""
+    text = (description or "").lower()
+
+    pothole_keywords = [
+        "pothole", "crater", "hole", "cavity", "depression", "sink", "broken asphalt",
+        "broken concrete", "missing road surface", "road damage", "damaged road",
+        "cracked road", "damaged patch", "uneven road", "deeper hole", "road surface"
+    ]
+    drainage_keywords = [
+        "waterlogging", "blocked drain", "drain blocked", "sewage overflow",
+        "stagnant water", "drainage", "flooded", "water on road"
+    ]
+    garbage_keywords = [
+        "overflowing garbage", "overflowing bin", "garbage bin", "waste pile",
+        "waste dump", "trash", "dumping", "garbage", "litter"
+    ]
+    streetlight_keywords = [
+        "streetlight", "street light", "light fixture", "broken pole", "fallen pole",
+        "missing fixture", "non-functioning light", "light is broken"
+    ]
+
+    if any(keyword in text for keyword in pothole_keywords):
+        severity = "high" if any(token in text for token in ["deep", "large", "major", "danger", "crater", "hole"]) else "medium"
+        return {
+            "issue_type": "pothole",
+            "severity": severity,
+            "confidence": 0.95,
+            "description": "Road surface damage such as a crater, hole, or broken asphalt is visible.",
+            "department": DEPARTMENT_MAP["pothole"]
+        }
+
+    if any(keyword in text for keyword in drainage_keywords):
+        severity = "high" if any(token in text for token in ["sewage", "overflow", "flood", "flooded"]) else "medium"
+        return {
+            "issue_type": "drainage",
+            "severity": severity,
+            "confidence": 0.92,
+            "description": "Drainage infrastructure or waterlogging is visible in the scene.",
+            "department": DEPARTMENT_MAP["drainage"]
+        }
+
+    if any(keyword in text for keyword in garbage_keywords):
+        severity = "high" if any(token in text for token in ["overflow", "dump", "pile"]) else "medium"
+        return {
+            "issue_type": "garbage",
+            "severity": severity,
+            "confidence": 0.9,
+            "description": "Garbage or waste dumping is visible in the area.",
+            "department": DEPARTMENT_MAP["garbage"]
+        }
+
+    if any(keyword in text for keyword in streetlight_keywords):
+        severity = "high" if any(token in text for token in ["fallen", "broken", "missing"]) else "medium"
+        return {
+            "issue_type": "streetlight",
+            "severity": severity,
+            "confidence": 0.91,
+            "description": "A streetlight or related lighting infrastructure is damaged or non-functional.",
+            "department": DEPARTMENT_MAP["streetlight"]
+        }
+
+    return {
+        "issue_type": "other",
+        "severity": "medium",
+        "confidence": 0.5,
+        "description": "No clear civic infrastructure issue was detected.",
+        "department": DEPARTMENT_MAP["other"]
+    }
+
 
 def download_image_as_base64(media_url: str) -> str:
     """Download Twilio image and convert to base64"""
@@ -39,12 +112,18 @@ def classify_issue(media_url: str) -> dict:
             "description": "one sentence describing what you see"
         }
         
-        Guidelines:
-        - garbage: overflowing bins, waste on streets, garbage dumps
-        - pothole: road damage, craters, broken road surface
-        - streetlight: broken, missing, or non-functioning street lights
-        - drainage: blocked drains, waterlogging, sewage overflow
-        - other: anything else civic related
+        Classification rules (apply in order of priority):
+        1. POTHOLE (highest priority)
+        Choose pothole if the road surface shows any sign of a crater, hole, cavity, depression, broken asphalt, broken concrete, missing road surface, cracked area large enough to affect vehicles, or uneven damaged patch.
+        2. DRAINAGE
+        Choose drainage if there is waterlogging, blocked drain, sewage overflow, or stagnant water near drainage infrastructure.
+        3. GARBAGE
+        Choose garbage if there is overflowing bins, waste piles, or scattered trash.
+        4. STREETLIGHT
+        Choose streetlight if there is a broken streetlight, fallen pole, missing fixture, or clearly non-functioning lighting infrastructure.
+        5. OTHER
+        Use other only if none of the above categories clearly apply.
+        A damaged road with a visible hole must never be classified as other.
         """
 
         response = client.chat.completions.create(
@@ -69,9 +148,11 @@ def classify_issue(media_url: str) -> dict:
                 result_text = result_text[4:]
 
         result = json.loads(result_text)
-        result['department'] = DEPARTMENT_MAP.get(
-            result['issue_type'], 'BBMP General'
-        )
+        normalized_issue = (result.get('issue_type') or 'other').lower()
+        if normalized_issue not in DEPARTMENT_MAP:
+            normalized_issue = 'other'
+        result['issue_type'] = normalized_issue
+        result['department'] = DEPARTMENT_MAP.get(normalized_issue, 'BBMP General')
         return result
 
     except Exception as e:
