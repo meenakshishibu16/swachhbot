@@ -87,6 +87,7 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('list')
   const [filterStatus, setFilterStatus] = useState('all')
+  const [highlightedComplaint, setHighlightedComplaint] = useState(null)
 
   const fetchComplaints = async () => {
     try {
@@ -154,7 +155,7 @@ export default function App() {
     commissioner: 'Commissioner'
   }
 
-  const [highlightedComplaint, setHighlightedComplaint] = useState(null)
+
 
   const handleViewOnMap = (complaint) => {
     setHighlightedComplaint(complaint)

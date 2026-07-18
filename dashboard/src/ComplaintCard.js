@@ -3,7 +3,7 @@ import { supabase } from './supabase'
 
 const API_URL = 'https://swachhbot-production.up.railway.app'
 
-export default function ComplaintCard({ complaint: c, user, onUpdate, statusColors, statusLabels, issueIcons }) {
+export default function ComplaintCard({ complaint: c, user, onUpdate, onViewOnMap, statusColors, statusLabels, issueIcons }) {
   const [note, setNote] = useState('')
   const [photoFile, setPhotoFile] = useState(null)
   const [loading, setLoading] = useState(false)
