@@ -47,7 +47,9 @@ The citizen never follows up. The agent keeps acting until the issue is resolved
 - **WhatsApp-only** — no app install, no portal login required
 - **Asset memory** — every public asset gets a persistent history of complaints and repairs
 - **Agentic escalation** — SLA-based automatic escalation to Ward Councillor → Commissioner
+- **Public landing page** — visitors can see a public SwachhBot overview and WhatsApp CTA before entering the dashboard
 - **Role-based dashboard** — Department / Councillor / Commissioner each see their relevant complaints
+- **Separate route flow** — the landing experience is available at the root route, while the dashboard is reached at /dashboard
 - **Two-step resolution** — department marks resolved, citizen verifies via WhatsApp
 - **Complaint reactivation** — if citizen says not resolved, complaint restarts with higher escalation
 - **Daily reminders** — up to 7 daily reminders to Commissioner if no action taken
