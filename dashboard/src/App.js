@@ -91,7 +91,6 @@ export default function App() {
   const [filterStatus, setFilterStatus] = useState('all')
   const [highlightedComplaint, setHighlightedComplaint] = useState(null)
   const [currentRoute, setCurrentRoute] = useState(() => resolveRoute(window.location.pathname))
-  const [showLanding, setShowLanding] = useState(true)
 
   const fetchComplaints = async () => {
     try {
@@ -111,6 +110,15 @@ export default function App() {
       return () => clearInterval(interval)
     }
   }, [user])
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setCurrentRoute(resolveRoute(window.location.pathname))
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
 
   const getFilteredComplaints = () => {
     if (!user) return []
@@ -137,9 +145,17 @@ export default function App() {
     return filtered
   }
 
+  const handleLogin = (loggedInUser) => {
+    setUser(loggedInUser)
+    setCurrentRoute('/dashboard')
+    window.history.pushState({}, '', '/dashboard')
+  }
+
   const handleLogout = async () => {
     await supabase.auth.signOut()
     setUser(null)
+    setCurrentRoute('/dashboard')
+    window.history.pushState({}, '', '/dashboard')
   }
 
   const filtered = getFilteredComplaints()
@@ -151,27 +167,20 @@ export default function App() {
     resolved: getFilteredComplaints().filter(c => c.status === 'resolved' || c.status === 'resolved_certified').length,
   }
 
-  if (currentRoute === '/landing' && !user) {
-    return <LandingPage onOpenDashboard={() => {
-      setCurrentRoute('/dashboard')
-      window.history.pushState({}, '', '/dashboard')
-      setShowLanding(false)
-    }} />
-  }
+  if (!user) {
+    if (currentRoute === '/dashboard') {
+      return <Login onLogin={handleLogin} />
+    }
 
-  if (currentRoute === '/dashboard' && !user) {
-    return <Login onLogin={setUser} />
+    return (
+      <LandingPage
+        onOpenDashboard={() => {
+          setCurrentRoute('/dashboard')
+          window.history.pushState({}, '', '/dashboard')
+        }}
+      />
+    )
   }
-
-  if (showLanding && !user) {
-    return <LandingPage onOpenDashboard={() => {
-      setCurrentRoute('/dashboard')
-      window.history.pushState({}, '', '/dashboard')
-      setShowLanding(false)
-    }} />
-  }
-
-  if (!user) return <Login onLogin={setUser} />
 
   const roleLabel = {
     department: `${user.department?.toUpperCase()} Dept`,
