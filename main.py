@@ -336,24 +336,6 @@ async def whatsapp_webhook(
         vision = classify_issue(photo_url)
         print(f"Vision result: {vision}")
 
-        # Check for duplicate complaint same spot within 24 hours
-        print("Checking for duplicate...")
-        existing_ticket = check_duplicate(lat, lng, vision['issue_type'])
-
-        if existing_ticket:
-            print(f"Duplicate found: {existing_ticket}")
-            send_whatsapp(citizen_phone,
-                f"📋 *Already Reported — Ticket #{existing_ticket}*\n\n"
-                f"This {vision['issue_type']} issue has already been "
-                f"reported at this location today.\n\n"
-                f"You've been added as a co-reporter — I'll notify "
-                f"you when it's resolved.\n\n"
-                f"No action needed from you. 🙏"
-            )
-            add_co_reporter(existing_ticket, citizen_phone)
-            pending.pop(citizen_phone, None)
-            return twiml_response()
-
         print("Running geo-router...")
         ward = get_ward(lat, lng)
         print(f"Ward: {ward}")
@@ -490,7 +472,6 @@ async def get_complaints():
                 c.photo_url,
                 c.decision_recommendation, c.failure_probability,
                 c.decision_action, c.decision_reasoning,
-                c.co_reporters,
                 ST_Y(a.location::geometry) as lat,
                 ST_X(a.location::geometry) as lng
             FROM complaints c
@@ -524,7 +505,6 @@ async def get_complaints():
                 "failure_probability": row[16],
                 "decision_action": row[17],
                 "decision_reasoning": row[18],
-                "co_reporters_count": len([p for p in (row[19] or '').split(',') if p.strip()]),
                 "lat": float(row[19]) if row[19] else 12.9716,
                 "lng": float(row[20]) if row[20] else 77.5946
             })
@@ -613,7 +593,7 @@ async def resolve_complaint(ticket_id: str, data: dict):
                 resolved_note = %s,
                 resolved_photo_url = %s
             WHERE ticket_id = %s
-            RETURNING citizen_phone, ward, issue_type, co_reporters
+            RETURNING citizen_phone, ward, issue_type
         """, (
             data.get('resolved_by'),
             data.get('resolved_note'),
@@ -627,7 +607,7 @@ async def resolve_complaint(ticket_id: str, data: dict):
         conn.close()
 
         if result:
-            phone, ward, issue_type, co_reporters = result
+            phone, ward, issue_type = result
             photo_url = data.get('resolved_photo_url', '')
 
             msg = (
@@ -645,30 +625,7 @@ async def resolve_complaint(ticket_id: str, data: dict):
                 f"Reply *2* — No, still an issue ❌"
             )
 
-            # Notify primary citizen
             send_whatsapp(phone, msg)
-
-            # Notify co-reporters
-            if co_reporters:
-                co_reporter_list = [
-                    p.strip() for p in co_reporters.split(',')
-                    if p.strip() and p.strip() != phone
-                ]
-                co_reporter_msg = (
-                    f"✅ *Update — Issue Resolved*\n\n"
-                    f"The {issue_type} issue at {ward} "
-                    f"that you reported has been resolved.\n"
-                )
-                if photo_url:
-                    co_reporter_msg += f"📸 Photo: {photo_url}\n"
-                if data.get('resolved_note'):
-                    co_reporter_msg += f"📝 Note: {data.get('resolved_note')}\n"
-                co_reporter_msg += "\nThank you for reporting! 🙏"
-
-                for co_phone in co_reporter_list:
-                    send_whatsapp(co_phone, co_reporter_msg)
-                    print(f"Notified co-reporter: {co_phone}")
-
             return {"message": "Pending citizen confirmation"}
         return {"error": "Ticket not found"}
 
