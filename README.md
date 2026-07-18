@@ -194,6 +194,7 @@ Dashboard runs at `http://localhost:3000`
 
 | Role | Email | Password |
 |---|---|---|
+| General Dept | general@bbmp.demo | Demo@1234 |
 | Solid Waste Dept | swm@bbmp.demo | Demo@1234 |
 | Roads Dept | roads@bbmp.demo | Demo@1234 |
 | Electrical Dept | electrical@bbmp.demo | Demo@1234 |
