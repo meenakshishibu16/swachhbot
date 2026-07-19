@@ -763,8 +763,8 @@ async def debug():
     return {
         "TWILIO_ACCOUNT_SID": os.environ.get("TWILIO_ACCOUNT_SID", "NOT FOUND"),
         "TWILIO_AUTH_TOKEN_LENGTH": len(os.environ.get("TWILIO_AUTH_TOKEN", "")),
-        "GROQ_KEY_START": os.environ.get("GROQ_API_KEY", "NOT FOUND")[:10] + "..."
-        if os.environ.get("GROQ_API_KEY") else "NOT FOUND",
+        "GEMINI_KEY_START": os.environ.get("GEMINI_API_KEY", "NOT FOUND")[:10] + "..."
+        if os.environ.get("GEMINI_API_KEY") else "NOT FOUND",
     }
 
 
