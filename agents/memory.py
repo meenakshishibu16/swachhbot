@@ -114,18 +114,17 @@ def create_or_update_asset(lat: float, lng: float,
         print(f"Asset update error: {e}")
         return None
     
-def check_duplicate(lat: float, lng: float, issue_type: str) -> str:
-    """Check if same issue reported at same spot in last 24 hours"""
+def get_existing_ticket_context(lat: float, lng: float, issue_type: str) -> dict:
+    """Return the nearest existing open ticket for a nearby same-issue report."""
     try:
         conn = get_connection()
         cur = conn.cursor()
         cur.execute("""
-            SELECT c.ticket_id
+            SELECT c.ticket_id, c.status, c.ward
             FROM complaints c
             JOIN assets a ON c.asset_id = a.id
             WHERE c.issue_type = %s
             AND c.status NOT IN ('resolved', 'resolved_certified')
-            AND c.filed_at > NOW() - INTERVAL '24 hours'
             AND ST_DWithin(
                 a.location,
                 ST_MakePoint(%s, %s)::geography,
@@ -137,10 +136,28 @@ def check_duplicate(lat: float, lng: float, issue_type: str) -> str:
         row = cur.fetchone()
         cur.close()
         conn.close()
-        return row[0] if row else None
+
+        if row:
+            return {
+                "ticket_id": row[0],
+                "status": row[1],
+                "ward": row[2],
+            }
+        return {}
     except Exception as e:
         print(f"Duplicate check error: {e}")
-        return None
+        return {}
+
+
+def find_existing_ticket(lat: float, lng: float, issue_type: str) -> str:
+    """Backward-compatible wrapper returning only the matching ticket ID."""
+    context = get_existing_ticket_context(lat, lng, issue_type)
+    return context.get("ticket_id")
+
+
+def check_duplicate(lat: float, lng: float, issue_type: str) -> str:
+    """Backward-compatible wrapper for duplicate ticket detection."""
+    return find_existing_ticket(lat, lng, issue_type)
 
 
 def add_co_reporter(ticket_id: str, citizen_phone: str):

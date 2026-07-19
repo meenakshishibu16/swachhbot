@@ -7,7 +7,13 @@ from datetime import datetime, timedelta
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from agents.vision import classify_issue
-from agents.memory import get_asset_history, create_or_update_asset, check_duplicate, add_co_reporter
+from agents.memory import (
+    get_asset_history,
+    create_or_update_asset,
+    check_duplicate,
+    get_existing_ticket_context,
+    add_co_reporter,
+)
 from agents.decision import make_decision
 from agents.execution import file_complaint, send_whatsapp, notify_department
 from agents.geo_router import get_ward
@@ -343,6 +349,20 @@ async def whatsapp_webhook(
         print("Running Memory agent...")
         memory = get_asset_history(lat, lng, vision['issue_type'])
         print(f"Memory result: {memory}")
+
+        existing_ticket = get_existing_ticket_context(lat, lng, vision['issue_type'])
+        if existing_ticket:
+            status_text = existing_ticket.get('status', 'active').replace('_', ' ')
+            ward_text = existing_ticket.get('ward') or 'unknown ward'
+            send_whatsapp(
+                citizen_phone,
+                f"ℹ️ A similar issue at this location is already being tracked under ticket #{existing_ticket['ticket_id']}.\n\n"
+                f"Status: {status_text.title()}\n"
+                f"Ward: {ward_text}\n\n"
+                "We’ll keep follow-up on the existing ticket instead of creating a duplicate. 🙏"
+            )
+            pending.pop(citizen_phone, None)
+            return twiml_response()
 
         print("Running Decision agent...")
         decision = make_decision(
