@@ -133,7 +133,7 @@ def classify_issue(media_url: str) -> dict:
         """
 
         response = client.chat.completions.create(
-            model='qwen/qwen3.6-27b',
+            model='meta-llama/llama-4-scout-17b-16e-instruct',
             messages=[{
                 'role': 'user',
                 'content': [
@@ -182,7 +182,7 @@ def classify_issue(media_url: str) -> dict:
             # If fallback also returns other — ask LLM again with stricter prompt
             print("Trying stricter LLM prompt...")
             strict_response = client.chat.completions.create(
-                model='qwen/qwen3.6-27b',
+                model='meta-llama/llama-4-scout-17b-16e-instruct',
                 messages=[{
                     'role': 'user',
                     'content': [
