@@ -38,7 +38,7 @@ def make_decision(issue_type: str, severity: str, history: dict) -> dict:
         }
 
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-3.5-flash',
             contents=prompt,
             config=types.GenerateContentConfig(
                 system_instruction="You are a civic infrastructure expert. Return data fitting the requested schema.",
