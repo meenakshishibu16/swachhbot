@@ -116,7 +116,8 @@ swachhbot/
 │       ├── App.js         # Main dashboard + map
 │       ├── Login.js       # Role-based login
 │       ├── ComplaintCard.js # Complaint card with actions
-│       └── supabase.js    # Supabase client
+│       ├── supabase.js    # Supabase client
+        └── LandingPage.js # Landing page of the bot
 ├── main.py                # FastAPI app + webhook + scheduler
 ├── config.py              # Environment variable loader
 ├── blr_wards.geojson      # Bengaluru ward boundaries (243 wards)
