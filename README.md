@@ -67,9 +67,9 @@ Twilio WhatsApp API
 FastAPI Backend (Railway)
         ↓
 LangGraph Agent Runtime
-    ├── Vision Agent (Groq Llama 4 Vision)
+    ├── Vision Agent (Gemini 3.5 flash)
     ├── Memory Agent (PostgreSQL + PostGIS)
-    ├── Decision Agent (Groq Llama 4)
+    ├── Decision Agent (Gemini 3.5 flash)
     └── Execution Agent (Twilio + PostgreSQL)
         ↓
 PostgreSQL + PostGIS (Supabase)
@@ -85,7 +85,7 @@ React Dashboard (Vercel — Role-based)
 |---|---|
 | Backend | FastAPI (Python) |
 | Agent Orchestration | LangGraph |
-| LLM + Vision | Groq (Llama 4 Scout) |
+| LLM + Vision | Gemini (3.5 flash) |
 | WhatsApp | Twilio WhatsApp Business API |
 | Database | PostgreSQL + PostGIS (Supabase) |
 | Geo-routing | Shapely + BBMP Ward GeoJSON |
@@ -103,9 +103,9 @@ React Dashboard (Vercel — Role-based)
 ```
 swachhbot/
 ├── agents/
-│   ├── vision.py          # Vision agent — Groq image classification
+│   ├── vision.py          # Vision agent — Gemini image classification
 │   ├── memory.py          # Memory agent — PostgreSQL asset history
-│   ├── decision.py        # Decision agent — Groq root cause reasoning
+│   ├── decision.py        # Decision agent — Gemini root cause reasoning
 │   ├── execution.py       # Execution agent — filing + notifications
 │   └── geo_router.py      # GPS → ward mapping via PostGIS + GeoJSON
 ├── db/
@@ -131,7 +131,7 @@ swachhbot/
 ### Prerequisites
 - Python 3.11+
 - Node.js 18+
-- Accounts: Twilio, Groq, Supabase, Google Maps
+- Accounts: Twilio, Google AI Studio (Gemini API), Supabase, Google Maps
 
 ### 1. Clone the repository
 ```bash
@@ -147,7 +147,7 @@ pip install -r requirements.txt
 ### 3. Set up environment variables
 Create a `.env` file in the root directory:
 ```
-GROQ_API_KEY=your_groq_key
+GEMINI_API_KEY=your_gemini_key
 TWILIO_ACCOUNT_SID=your_twilio_sid
 TWILIO_AUTH_TOKEN=your_twilio_auth_token
 TWILIO_WHATSAPP_NUMBER=whatsapp:+14155238886
@@ -264,7 +264,7 @@ Marked as Stuck — citizen directed to IPGRS portal
 |---|---|---|---|
 | FastAPI | 0.115.x | MIT | Backend web framework |
 | LangGraph | 0.2.x | MIT | Stateful agent orchestration |
-| Groq Python SDK | 0.11.x | Apache 2.0 | LLM + Vision API |
+| Google Generative AI SDK | 0.1.1 | Apache 2.0 | LLM + Vision API |
 | Twilio Python | 9.x | MIT | WhatsApp messaging |
 | psycopg2-binary | 2.9.x | LGPL | PostgreSQL connection |
 | Shapely | 2.x | BSD | GPS point-in-polygon |
