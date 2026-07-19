@@ -162,6 +162,18 @@ SUPABASE_SERVICE_KEY=your_supabase_service_key
 ```bash
 py -m db.models
 ```
+Run the complete schema on your Supabase project:
+
+1. Go to Supabase → SQL Editor
+2. Copy and paste the contents of `database/schema.sql`
+3. Click **Run**
+
+This creates all tables, seeds SLA config, demo users, and sample assets.
+
+Then create Supabase Auth users for the dashboard:
+- Go to Supabase → Authentication → Users → Add User
+- Create one user per email in `database/schema.sql` with password `Demo@1234`
+- Make sure "Auto Confirm User" is checked
 
 ### 5. Run the backend
 ```bash
