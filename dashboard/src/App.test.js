@@ -8,6 +8,6 @@ test('renders the SwachhBot landing page with a WhatsApp CTA', () => {
   expect(screen.getByText(/Autonomous civic grievance resolution/i)).toBeInTheDocument();
   expect(screen.getByRole('link', { name: /chat on whatsapp/i })).toHaveAttribute(
     'href',
-    'https://wa.me/14155238886?text=join%20dark-comfortable'
+    'https://wa.me/14155238886?text=join%20morning-what'
   );
 });
