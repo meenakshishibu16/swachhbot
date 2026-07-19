@@ -27,7 +27,7 @@ const workflow = [
   'The issue is resolved and verified through a simple confirmation step'
 ]
 
-const whatsappUrl = 'https://wa.me/14155238886?text=join%20morning-what'
+const whatsappUrl = 'https://wa.me/14155238886?text=join%20vowel-quietly'
 
 export default function LandingPage({ onOpenDashboard }) {
   return (
