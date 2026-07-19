@@ -114,16 +114,22 @@ def classify_issue(media_url: str) -> dict:
         
         Classification rules (apply in order of priority):
         1. POTHOLE (highest priority)
-        Choose pothole if the road surface shows any sign of a crater, hole, cavity, depression, broken asphalt, broken concrete, missing road surface, cracked area large enough to affect vehicles, or uneven damaged patch.
+           Choose pothole if the road surface shows any sign of a crater, 
+           hole, cavity, depression, broken asphalt, broken concrete, 
+           missing road surface, cracked area large enough to affect vehicles, 
+           or uneven damaged patch.
         2. DRAINAGE
-        Choose drainage if there is waterlogging, blocked drain, sewage overflow, or stagnant water near drainage infrastructure.
+           Choose drainage if there is waterlogging, blocked drain, 
+           sewage overflow, or stagnant water near drainage infrastructure.
         3. GARBAGE
-        Choose garbage if there is overflowing bins, waste piles, or scattered trash.
+           Choose garbage if there is overflowing bins, waste piles, 
+           or scattered trash.
         4. STREETLIGHT
-        Choose streetlight if there is a broken streetlight, fallen pole, missing fixture, or clearly non-functioning lighting infrastructure.
+           Choose streetlight if there is a broken streetlight, fallen pole, 
+           missing fixture, or clearly non-functioning lighting infrastructure.
         5. OTHER
-        Use other only if none of the above categories clearly apply.
-        A damaged road with a visible hole must never be classified as other.
+           Use other only if none of the above categories clearly apply.
+           A damaged road with a visible hole must never be classified as other.
         """
 
         response = client.chat.completions.create(
@@ -137,22 +143,83 @@ def classify_issue(media_url: str) -> dict:
                     }}
                 ]
             }],
-            max_tokens=200
+            max_tokens=300
         )
 
         result_text = response.choices[0].message.content.strip()
+        print(f"Raw LLM response: {result_text}")
 
+        # Clean JSON
         if '```' in result_text:
             result_text = result_text.split('```')[1]
             if result_text.startswith('json'):
                 result_text = result_text[4:]
 
+        # Try to extract JSON even if there's extra text
+        json_match = re.search(r'\{.*?\}', result_text, re.DOTALL)
+        if json_match:
+            result_text = json_match.group(0)
+
         result = json.loads(result_text)
-        normalized_issue = (result.get('issue_type') or 'other').lower()
+
+        normalized_issue = (result.get('issue_type') or 'other').lower().strip()
         if normalized_issue not in DEPARTMENT_MAP:
             normalized_issue = 'other'
+
         result['issue_type'] = normalized_issue
         result['department'] = DEPARTMENT_MAP.get(normalized_issue, 'BBMP General')
+
+        # If LLM returns 'other' or low confidence — try rule-based fallback
+        confidence = float(result.get('confidence', 0))
+        if normalized_issue == 'other' or confidence < 0.6:
+            print(f"LLM confidence low ({confidence}) or returned 'other' — trying rule-based fallback")
+            description = result.get('description', '')
+            fallback = apply_classification_rules(description)
+            if fallback['issue_type'] != 'other':
+                print(f"Rule-based fallback: {fallback['issue_type']}")
+                return fallback
+            
+            # If fallback also returns other — ask LLM again with stricter prompt
+            print("Trying stricter LLM prompt...")
+            strict_response = client.chat.completions.create(
+                model='meta-llama/llama-4-scout-17b-16e-instruct',
+                messages=[{
+                    'role': 'user',
+                    'content': [
+                        {'type': 'text', 'text': f"""
+                        Look at this image very carefully.
+                        
+                        You previously described it as: "{description}"
+                        
+                        Now choose EXACTLY ONE category:
+                        - pothole: ANY road damage, hole, crater, broken surface
+                        - drainage: waterlogging, flooded area, blocked drain
+                        - garbage: waste, trash, overflowing bin
+                        - streetlight: broken light, fallen pole
+                        - other: ONLY if truly none of the above
+                        
+                        Return ONLY: {{"issue_type": "one of the above", "severity": "low|medium|high", "confidence": 0.9, "description": "brief description"}}
+                        """},
+                        {'type': 'image_url', 'image_url': {
+                            'url': f'data:image/jpeg;base64,{image_b64}'
+                        }}
+                    ]
+                }],
+                max_tokens=150
+            )
+            
+            strict_text = strict_response.choices[0].message.content.strip()
+            print(f"Strict LLM response: {strict_text}")
+            
+            json_match2 = re.search(r'\{.*?\}', strict_text, re.DOTALL)
+            if json_match2:
+                strict_result = json.loads(json_match2.group(0))
+                strict_issue = (strict_result.get('issue_type') or 'other').lower()
+                if strict_issue in DEPARTMENT_MAP and strict_issue != 'other':
+                    strict_result['issue_type'] = strict_issue
+                    strict_result['department'] = DEPARTMENT_MAP[strict_issue]
+                    return strict_result
+
         return result
 
     except Exception as e:
